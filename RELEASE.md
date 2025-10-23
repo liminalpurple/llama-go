@@ -103,7 +103,8 @@ docker run --rm -v $(pwd):/workspace -w /workspace git.tomfos.tr/tom/llama-go:bu
 
 # Run test suite with test model (tests inference, speculative sampling, tokenisation)
 # Use build-cuda container which includes correct CUDA drivers and Go version
-docker run --rm --gpus all -v $(pwd):/workspace -w /workspace \
+# Limit to 8 CPUs to avoid monopolising shared server resources
+docker run --rm --gpus all --cpus=8 -v $(pwd):/workspace -w /workspace \
   -e TEST_MODEL=Qwen3-0.6B-Q8_0.gguf -e LLAMA_LOG=error \
   git.tomfos.tr/tom/llama-go:build-cuda \
   "go run github.com/onsi/ginkgo/v2/ginkgo -v ./..."
@@ -141,7 +142,7 @@ For projects requiring GPU acceleration, test CUDA support:
 3. Test GPU acceleration with Go 1.25+:
 
    ```bash
-   docker run --rm --gpus all -v $(pwd):/workspace go-llama-cuda \
+   docker run --rm --gpus all --cpus=8 -v $(pwd):/workspace go-llama-cuda \
      bash -c "wget -q https://go.dev/dl/go1.25.1.linux-amd64.tar.gz && \
               tar -C /usr/local -xzf go1.25.1.linux-amd64.tar.gz && \
               export PATH=/usr/local/go/bin:\$PATH && \
