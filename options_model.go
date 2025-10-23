@@ -366,3 +366,74 @@ func WithParallel(n int) ModelOption {
 		c.nParallel = n
 	}
 }
+
+// WithSilentLoading disables progress output during model loading.
+//
+// By default, llama.cpp prints dots to stderr to indicate loading progress.
+// This option suppresses that output completely, useful for clean logs in
+// production environments or when progress output interferes with other
+// output formatting.
+//
+// Note: The LLAMA_LOG environment variable controls general logging but
+// does not suppress progress dots. Use this option for truly silent loading.
+//
+// Default: false (shows progress dots)
+//
+// Example:
+//
+//	model, err := llama.LoadModel("model.gguf",
+//	    llama.WithSilentLoading(),
+//	)
+func WithSilentLoading() ModelOption {
+	return func(c *modelConfig) {
+		c.disableProgressCallback = true
+	}
+}
+
+// ProgressCallback is called during model loading with progress 0.0-1.0.
+// Return false to cancel loading, true to continue.
+type ProgressCallback func(progress float32) bool
+
+// WithProgressCallback sets a custom progress callback for model loading.
+//
+// The callback is invoked periodically during model loading with progress
+// values from 0.0 (start) to 1.0 (complete). This allows implementing
+// custom progress indicators, logging, or loading cancellation.
+//
+// The callback receives:
+//   - progress: float32 from 0.0 to 1.0 indicating loading progress
+//
+// The callback must return:
+//   - true: continue loading
+//   - false: cancel loading (LoadModel will return an error)
+//
+// IMPORTANT: The callback is invoked from a C thread during model loading.
+// Ensure any operations are thread-safe. The callback should complete
+// quickly to avoid blocking the loading process.
+//
+// Default: nil (uses llama.cpp default dot printing)
+//
+// Examples:
+//
+//	// Simple progress indicator
+//	model, err := llama.LoadModel("model.gguf",
+//	    llama.WithProgressCallback(func(progress float32) bool {
+//	        fmt.Printf("\rLoading: %.0f%%", progress*100)
+//	        return true
+//	    }),
+//	)
+//
+//	// Cancel loading after 50%
+//	model, err := llama.LoadModel("model.gguf",
+//	    llama.WithProgressCallback(func(progress float32) bool {
+//	        if progress > 0.5 {
+//	            return false // Cancel
+//	        }
+//	        return true
+//	    }),
+//	)
+func WithProgressCallback(cb ProgressCallback) ModelOption {
+	return func(c *modelConfig) {
+		c.progressCallback = cb
+	}
+}

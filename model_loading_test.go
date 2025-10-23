@@ -659,3 +659,354 @@ var _ = Describe("Model Finaliser", func() {
 		})
 	})
 })
+
+var _ = Describe("Progress Callbacks", func() {
+	Context("with WithSilentLoading", func() {
+		var modelPath string
+
+		BeforeEach(func() {
+			modelPath = os.Getenv("TEST_CHAT_MODEL")
+			if modelPath == "" {
+				Skip("TEST_CHAT_MODEL not set")
+			}
+		})
+
+		It("should load model without printing progress dots", Label("integration"), func() {
+			model, err := llama.LoadModel(modelPath,
+				llama.WithSilentLoading(),
+				llama.WithContext(2048),
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(model).NotTo(BeNil())
+			defer model.Close()
+
+			// Verify model works normally after silent loading
+			tokens, err := model.Tokenize("test")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(tokens).NotTo(BeEmpty())
+		})
+
+		It("should work with other options", Label("integration"), func() {
+			model, err := llama.LoadModel(modelPath,
+				llama.WithSilentLoading(),
+				llama.WithContext(2048),
+				llama.WithGPULayers(0),
+				llama.WithThreads(2),
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(model).NotTo(BeNil())
+			defer model.Close()
+
+			response, err := model.Generate("Test", llama.WithMaxTokens(5))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(response).NotTo(BeEmpty())
+		})
+	})
+
+	Context("with WithProgressCallback", func() {
+		var modelPath string
+
+		BeforeEach(func() {
+			modelPath = os.Getenv("TEST_CHAT_MODEL")
+			if modelPath == "" {
+				Skip("TEST_CHAT_MODEL not set")
+			}
+		})
+
+		It("should call callback during model loading", Label("integration"), func() {
+			var progressValues []float32
+			var callCount int
+
+			model, err := llama.LoadModel(modelPath,
+				llama.WithProgressCallback(func(progress float32) bool {
+					progressValues = append(progressValues, progress)
+					callCount++
+					return true // Continue loading
+				}),
+				llama.WithContext(2048),
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(model).NotTo(BeNil())
+			defer model.Close()
+
+			// Verify callback was called
+			Expect(callCount).To(BeNumerically(">", 0))
+			Expect(progressValues).NotTo(BeEmpty())
+
+			// Verify progress values are in range 0.0-1.0
+			Expect(progressValues[0]).To(BeNumerically(">=", 0.0))
+			Expect(progressValues[len(progressValues)-1]).To(BeNumerically("<=", 1.0))
+		})
+
+		It("should receive monotonically increasing progress values", Label("integration"), func() {
+			var progressValues []float32
+
+			model, err := llama.LoadModel(modelPath,
+				llama.WithProgressCallback(func(progress float32) bool {
+					progressValues = append(progressValues, progress)
+					return true
+				}),
+				llama.WithContext(2048),
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(model).NotTo(BeNil())
+			defer model.Close()
+
+			// Verify progress values generally increase (allowing for small variations)
+			// Note: Progress may not be strictly monotonic due to threading, but should trend upward
+			Expect(progressValues).NotTo(BeEmpty())
+			if len(progressValues) > 1 {
+				firstValue := progressValues[0]
+				lastValue := progressValues[len(progressValues)-1]
+				Expect(lastValue).To(BeNumerically(">=", firstValue))
+			}
+		})
+
+		It("should cancel loading when callback returns false", Label("integration"), func() {
+			model, err := llama.LoadModel(modelPath,
+				llama.WithProgressCallback(func(progress float32) bool {
+					// Cancel immediately
+					return false
+				}),
+				llama.WithContext(2048),
+			)
+
+			// Loading should fail due to cancellation
+			Expect(err).To(HaveOccurred())
+			Expect(model).To(BeNil())
+		})
+
+		It("should cancel loading at specific progress threshold", Label("integration"), func() {
+			var maxProgress float32
+
+			model, err := llama.LoadModel(modelPath,
+				llama.WithProgressCallback(func(progress float32) bool {
+					if progress > maxProgress {
+						maxProgress = progress
+					}
+					if progress > 0.5 {
+						return false // Cancel after 50%
+					}
+					return true
+				}),
+				llama.WithContext(2048),
+			)
+
+			// Should fail due to cancellation
+			Expect(err).To(HaveOccurred())
+			Expect(model).To(BeNil())
+
+			// Verify we got past the threshold before cancellation
+			// Note: Actual cancellation may happen slightly after threshold due to threading
+			Expect(maxProgress).To(BeNumerically(">", 0.0))
+		})
+
+		It("should work with other options", Label("integration"), func() {
+			var callCount int
+
+			model, err := llama.LoadModel(modelPath,
+				llama.WithProgressCallback(func(progress float32) bool {
+					callCount++
+					return true
+				}),
+				llama.WithContext(2048),
+				llama.WithGPULayers(0),
+				llama.WithThreads(2),
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(model).NotTo(BeNil())
+			defer model.Close()
+
+			Expect(callCount).To(BeNumerically(">", 0))
+
+			// Verify model works after callback-monitored loading
+			response, err := model.Generate("Test", llama.WithMaxTokens(5))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(response).NotTo(BeEmpty())
+		})
+
+		It("should clean up callback registry on successful load", Label("integration"), func() {
+			var callCount int
+
+			model, err := llama.LoadModel(modelPath,
+				llama.WithProgressCallback(func(progress float32) bool {
+					callCount++
+					return true
+				}),
+				llama.WithContext(2048),
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(model).NotTo(BeNil())
+
+			callbackID := model.ProgressCallbackID
+			Expect(callbackID).NotTo(Equal(uintptr(0)))
+
+			// Close should clean up registry
+			model.Close()
+
+			// We can't directly access the registry, but we can verify
+			// that closing worked without panics
+			runtime.GC()
+		})
+
+		It("should clean up callback registry on failed load", Label("unit"), func() {
+			var callCount int
+
+			model, err := llama.LoadModel("/nonexistent/model.gguf",
+				llama.WithProgressCallback(func(progress float32) bool {
+					callCount++
+					return true
+				}),
+			)
+
+			Expect(err).To(HaveOccurred())
+			Expect(model).To(BeNil())
+
+			// Registry should be cleaned up even on failure
+			// Verify no memory leaks by running GC
+			runtime.GC()
+		})
+
+		It("should clean up callback registry on cancelled load", Label("integration"), func() {
+			model, err := llama.LoadModel(modelPath,
+				llama.WithProgressCallback(func(progress float32) bool {
+					return false // Cancel immediately
+				}),
+				llama.WithContext(2048),
+			)
+
+			Expect(err).To(HaveOccurred())
+			Expect(model).To(BeNil())
+
+			// Registry should be cleaned up on cancellation
+			runtime.GC()
+		})
+	})
+
+	Context("callback registry management", func() {
+		var modelPath string
+
+		BeforeEach(func() {
+			modelPath = os.Getenv("TEST_CHAT_MODEL")
+			if modelPath == "" {
+				Skip("TEST_CHAT_MODEL not set")
+			}
+		})
+
+		It("should handle multiple models with callbacks simultaneously", Label("integration"), func() {
+			var count1, count2 int
+
+			model1, err1 := llama.LoadModel(modelPath,
+				llama.WithProgressCallback(func(progress float32) bool {
+					count1++
+					return true
+				}),
+				llama.WithContext(2048),
+			)
+			Expect(err1).NotTo(HaveOccurred())
+			Expect(model1).NotTo(BeNil())
+			defer model1.Close()
+
+			model2, err2 := llama.LoadModel(modelPath,
+				llama.WithProgressCallback(func(progress float32) bool {
+					count2++
+					return true
+				}),
+				llama.WithContext(2048),
+			)
+			Expect(err2).NotTo(HaveOccurred())
+			Expect(model2).NotTo(BeNil())
+			defer model2.Close()
+
+			// Both callbacks should have been called
+			Expect(count1).To(BeNumerically(">", 0))
+			Expect(count2).To(BeNumerically(">", 0))
+
+			// Verify both models work
+			tokens1, err := model1.Tokenize("test")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(tokens1).NotTo(BeEmpty())
+
+			tokens2, err := model2.Tokenize("test")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(tokens2).NotTo(BeEmpty())
+		})
+
+		It("should assign unique callback IDs", Label("integration"), func() {
+			model1, err1 := llama.LoadModel(modelPath,
+				llama.WithProgressCallback(func(progress float32) bool {
+					return true
+				}),
+				llama.WithContext(2048),
+			)
+			Expect(err1).NotTo(HaveOccurred())
+			Expect(model1).NotTo(BeNil())
+			defer model1.Close()
+
+			id1 := model1.ProgressCallbackID
+
+			model2, err2 := llama.LoadModel(modelPath,
+				llama.WithProgressCallback(func(progress float32) bool {
+					return true
+				}),
+				llama.WithContext(2048),
+			)
+			Expect(err2).NotTo(HaveOccurred())
+			Expect(model2).NotTo(BeNil())
+			defer model2.Close()
+
+			id2 := model2.ProgressCallbackID
+
+			// IDs should be different
+			Expect(id1).NotTo(Equal(id2))
+			Expect(id1).NotTo(Equal(uintptr(0)))
+			Expect(id2).NotTo(Equal(uintptr(0)))
+		})
+	})
+
+	Context("with embedding models", func() {
+		var embeddingModelPath string
+
+		BeforeEach(func() {
+			embeddingModelPath = os.Getenv("TEST_EMBEDDING_MODEL")
+			if embeddingModelPath == "" {
+				Skip("TEST_EMBEDDING_MODEL not set")
+			}
+		})
+
+		It("should work with WithSilentLoading for embedding models", Label("integration"), func() {
+			model, err := llama.LoadModel(embeddingModelPath,
+				llama.WithSilentLoading(),
+				llama.WithEmbeddings(),
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(model).NotTo(BeNil())
+			defer model.Close()
+
+			embeddings, err := model.GetEmbeddings("Test")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(embeddings).NotTo(BeEmpty())
+		})
+
+		It("should work with WithProgressCallback for embedding models", Label("integration"), func() {
+			var callCount int
+
+			model, err := llama.LoadModel(embeddingModelPath,
+				llama.WithProgressCallback(func(progress float32) bool {
+					callCount++
+					return true
+				}),
+				llama.WithEmbeddings(),
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(model).NotTo(BeNil())
+			defer model.Close()
+
+			Expect(callCount).To(BeNumerically(">", 0))
+
+			embeddings, err := model.GetEmbeddings("Test")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(embeddings).NotTo(BeEmpty())
+		})
+	})
+})

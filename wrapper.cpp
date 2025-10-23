@@ -53,8 +53,9 @@ void llama_wrapper_init_logging() {
     llama_log_set(llama_log_callback, nullptr);
 }
 
-// Forward declaration of Go callback function
+// Forward declarations of Go callback functions
 extern bool goTokenCallback(uintptr_t handle, const char* token);
+extern bool goProgressCallback(float progress, void* user_data);
 
 // Separate wrappers for model and context
 struct llama_wrapper_model_t {
@@ -78,6 +79,13 @@ void llama_wrapper_free_result(char* result) {
     }
 }
 
+// Static no-op callback for silent loading
+static bool silent_progress_callback(float progress, void* user_data) {
+    (void)progress;
+    (void)user_data;
+    return true;  // Continue loading
+}
+
 // Convert our params to llama.cpp model params
 static struct llama_model_params convert_model_params(llama_wrapper_model_params params) {
     struct llama_model_params model_params = llama_model_default_params();
@@ -92,6 +100,16 @@ static struct llama_model_params convert_model_params(llama_wrapper_model_params
     model_params.use_mmap = params.mmap;
     model_params.use_mlock = params.mlock;
     model_params.no_host = false;  // Use host buffers (b6709 added field)
+
+    // Configure progress callback
+    if (params.disable_progress_callback) {
+        model_params.progress_callback = silent_progress_callback;
+        model_params.progress_callback_user_data = nullptr;
+    } else if (params.progress_callback) {
+        model_params.progress_callback = params.progress_callback;
+        model_params.progress_callback_user_data = params.progress_callback_user_data;
+    }
+    // Otherwise NULL → llama.cpp installs default dot printer
 
     return model_params;
 }

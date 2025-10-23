@@ -7,6 +7,9 @@ extern "C" {
 #include <stdbool.h>
 #include <stdint.h>
 
+// Progress callback type (matches llama.cpp signature)
+typedef bool (*llama_progress_callback_wrapper)(float progress, void* user_data);
+
 // Model parameters for loading
 typedef struct {
     int n_ctx;              // Context size
@@ -22,6 +25,9 @@ typedef struct {
     const char* main_gpu;   // Main GPU
     const char* tensor_split; // Tensor split
     const char* kv_cache_type; // KV cache quantization: "f16", "q8_0", "q4_0"
+    bool disable_progress_callback;           // For silent loading
+    llama_progress_callback_wrapper progress_callback;  // Custom callback
+    void* progress_callback_user_data;        // User data for callback
 } llama_wrapper_model_params;
 
 // Generation parameters

@@ -14,13 +14,27 @@ import (
 #cgo LDFLAGS: -L./ -lbinding -lcommon -lllama -lggml-cpu -lggml-base -lggml -lstdc++ -lm
 #include "wrapper.h"
 #include <stdlib.h>
+
+// Helper function to get the address of the Go progress callback
+extern bool goProgressCallback(float progress, void* user_data);
+
+static inline llama_progress_callback_wrapper get_go_progress_callback() {
+	return (llama_progress_callback_wrapper)goProgressCallback;
+}
 */
 import "C"
 
 func init() {
-	// Initialize llama.cpp logging based on LLAMA_LOG environment variable
+	// Initialise llama.cpp logging based on LLAMA_LOG environment variable
 	C.llama_wrapper_init_logging()
 }
+
+// Progress callback registry for Go callbacks
+var (
+	progressCallbackRegistry sync.Map
+	progressCallbackCounter  uintptr
+	progressCallbackMutex    sync.Mutex
+)
 
 // InitLogging (re)initializes llama.cpp logging system based on LLAMA_LOG environment variable.
 //
@@ -75,32 +89,35 @@ type contextPool struct {
 //
 // Note: Calling methods after Close() returns an error.
 type Model struct {
-	modelPtr      unsafe.Pointer // llama_wrapper_model_t* (weights only)
-	pool          *contextPool
-	mu            sync.RWMutex
-	closed        bool
-	chatTemplates unsafe.Pointer // cached common_chat_templates*
+	modelPtr           unsafe.Pointer // llama_wrapper_model_t* (weights only)
+	pool               *contextPool
+	mu                 sync.RWMutex
+	closed             bool
+	chatTemplates      unsafe.Pointer // cached common_chat_templates*
+	ProgressCallbackID uintptr        // Internal ID for progress callback cleanup (for testing)
 }
 
 // modelConfig holds configuration for model loading
 type modelConfig struct {
-	contextSize   int
-	batchSize     int
-	gpuLayers     int
-	threads       int
-	threadsBatch  int
-	nParallel     int // Number of parallel sequences (for batch embeddings)
-	f16Memory     bool
-	mlock         bool
-	mmap          bool
-	embeddings    bool
-	mainGPU       string
-	tensorSplit   string
-	minContexts   int
-	maxContexts   int
-	idleTimeout   time.Duration
-	prefixCaching bool   // Enable KV cache prefix reuse (default: true)
-	kvCacheType   string // KV cache quantization type: "f16", "q8_0", "q4_0" (default: "q8_0")
+	contextSize            int
+	batchSize              int
+	gpuLayers              int
+	threads                int
+	threadsBatch           int
+	nParallel              int // Number of parallel sequences (for batch embeddings)
+	f16Memory              bool
+	mlock                  bool
+	mmap                   bool
+	embeddings             bool
+	mainGPU                string
+	tensorSplit            string
+	minContexts            int
+	maxContexts            int
+	idleTimeout            time.Duration
+	prefixCaching          bool   // Enable KV cache prefix reuse (default: true)
+	kvCacheType            string // KV cache quantization type: "f16", "q8_0", "q4_0" (default: "q8_0")
+	disableProgressCallback bool
+	progressCallback       ProgressCallback
 }
 
 // generateConfig holds configuration for text generation
@@ -335,9 +352,30 @@ func LoadModel(path string, opts ...ModelOption) (*Model, error) {
 		kv_cache_type:   cKVCacheType,
 	}
 
+	// Configure progress callback if requested
+	var callbackID uintptr
+	if config.progressCallback != nil {
+		progressCallbackMutex.Lock()
+		progressCallbackCounter++
+		callbackID = progressCallbackCounter
+		progressCallbackMutex.Unlock()
+
+		progressCallbackRegistry.Store(callbackID, config.progressCallback)
+
+		// Set C callback (using helper function to get the function pointer)
+		params.progress_callback = C.get_go_progress_callback()
+		params.progress_callback_user_data = unsafe.Pointer(callbackID)
+	} else if config.disableProgressCallback {
+		params.disable_progress_callback = C.bool(true)
+	}
+
 	// Load model (weights only)
 	modelPtr := C.llama_wrapper_model_load(cPath, params)
 	if modelPtr == nil {
+		// Clean up callback registry on failure
+		if callbackID != 0 {
+			progressCallbackRegistry.Delete(callbackID)
+		}
 		return nil, fmt.Errorf("failed to load model: %s", C.GoString(C.llama_wrapper_last_error()))
 	}
 
@@ -361,8 +399,9 @@ func LoadModel(path string, opts ...ModelOption) (*Model, error) {
 	}
 
 	model := &Model{
-		modelPtr: modelPtr,
-		pool:     pool,
+		modelPtr:           modelPtr,
+		pool:               pool,
+		ProgressCallbackID: callbackID,
 	}
 
 	// Set finaliser to ensure cleanup
@@ -394,6 +433,12 @@ func (m *Model) Close() error {
 
 	// Remove finaliser FIRST to prevent race with GC
 	runtime.SetFinalizer(m, nil)
+
+	// Clean up progress callback registry
+	if m.ProgressCallbackID != 0 {
+		progressCallbackRegistry.Delete(m.ProgressCallbackID)
+		m.ProgressCallbackID = 0
+	}
 
 	// Free chat templates if cached
 	if m.chatTemplates != nil {
