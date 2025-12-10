@@ -38,7 +38,7 @@ endif
 BUILD_TYPE?=
 # keep standard at C11 and C++17
 CFLAGS   = -I./llama.cpp -I. -O3 -DNDEBUG -std=c11 -fPIC
-CXXFLAGS = -I./llama.cpp -I. -I./llama.cpp/common -I./common -I./llama.cpp/ggml/include -I./llama.cpp/include -O3 -DNDEBUG -std=c++17 -fPIC
+CXXFLAGS = -I./llama.cpp -I. -I./llama.cpp/common -I./common -I./llama.cpp/ggml/include -I./llama.cpp/include -I./llama.cpp/vendor -O3 -DNDEBUG -std=c++17 -fPIC
 LDFLAGS  =
 
 # warnings
