@@ -20,7 +20,8 @@ jobs:
     env:
       LIBRARY_PATH: ${{ github.workspace }}
       C_INCLUDE_PATH: ${{ github.workspace }}
-      LD_LIBRARY_PATH: ${{ github.workspace }}:${{ github.workspace }}/build/bin
+      # No LD_LIBRARY_PATH needed: default BUILD_LINKAGE=static links everything in.
+      # (Shared-mode opt-in handles runtime via -Wl,-rpath,$ORIGIN baked into the binary.)
       # Configure sccache for CMake builds
       CMAKE_C_COMPILER_LAUNCHER: sccache
       CMAKE_CXX_COMPILER_LAUNCHER: sccache
@@ -68,20 +69,16 @@ jobs:
 
       - name: Build library
         run: |
-          make libbinding.a
+          BUILD_TYPE=cublas CUDA_ARCHITECTURES=86 make libbinding.a
 
       - name: Debug - List built artifacts
         run: |
           echo "=== GPU Detection ==="
           nvidia-smi || echo "No GPU detected"
-          echo "=== Files in build/bin ==="
-          ls -la build/bin/ || echo "build/bin not found"
           echo "=== Files in workspace root ==="
-          ls -la *.so *.a 2>/dev/null || echo "No .so or .a files in workspace root"
+          ls -la *.a *.so 2>/dev/null || echo "No .a or .so files in workspace root"
           echo "=== Current working directory ==="
           pwd
-          echo "=== LD_LIBRARY_PATH ==="
-          echo "$LD_LIBRARY_PATH"
 
       - name: Download test models
         run: |
@@ -94,8 +91,8 @@ jobs:
 
       - name: Run tests
         run: |
-          go run github.com/onsi/ginkgo/v2/ginkgo -v ./...
+          go run github.com/onsi/ginkgo/v2/ginkgo -tags cublas -v ./...
 
       - name: Run example
         run: |
-          go run ./examples/simple -m Qwen3-0.6B-Q8_0.gguf -p 'Hello world' -n 50
+          go run -tags cublas ./examples/simple -m Qwen3-0.6B-Q8_0.gguf -p 'Hello world' -n 50
