@@ -908,6 +908,15 @@ void llama_wrapper_free_tokens(int* tokens) {
     }
 }
 
+// A model without pooling gives an embedding per token, not one per text
+static bool check_pooling(const llama_wrapper_context_t * wrapper) {
+    if (llama_pooling_type(wrapper->ctx) == LLAMA_POOLING_TYPE_NONE) {
+        g_last_error = "Model has no pooling, so it can't produce one embedding per text";
+        return false;
+    }
+    return true;
+}
+
 int llama_wrapper_embeddings(void* ctx, const char* text, float* embeddings, int max_embeddings) {
     if (!ctx || !text || !embeddings) {
         g_last_error = "Invalid parameters for embeddings";
@@ -915,6 +924,9 @@ int llama_wrapper_embeddings(void* ctx, const char* text, float* embeddings, int
     }
 
     auto wrapper = static_cast<llama_wrapper_context_t*>(ctx);
+    if (!check_pooling(wrapper)) {
+        return -1;
+    }
 
     try {
         // Clear KV cache to ensure clean state
@@ -923,8 +935,9 @@ int llama_wrapper_embeddings(void* ctx, const char* text, float* embeddings, int
         // Tokenize text
         std::vector<llama_token> tokens = common_tokenize(wrapper->ctx, text, true, true);
 
+        // Models whose tokeniser adds no BOS give no tokens for empty text
         if (tokens.empty()) {
-            g_last_error = "Failed to tokenize text for embeddings";
+            g_last_error = "Input content cannot be empty";
             return -1;
         }
 
@@ -965,6 +978,9 @@ int llama_wrapper_embeddings_batch(void* ctx, const char** texts, int n_texts, f
     }
 
     auto wrapper = static_cast<llama_wrapper_context_t*>(ctx);
+    if (!check_pooling(wrapper)) {
+        return -1;
+    }
 
     try {
         // Clear KV cache to ensure clean state
@@ -981,7 +997,7 @@ int llama_wrapper_embeddings_batch(void* ctx, const char** texts, int n_texts, f
             }
             std::vector<llama_token> tokens = common_tokenize(wrapper->ctx, texts[i], true, true);
             if (tokens.empty()) {
-                g_last_error = "Failed to tokenize text at index " + std::to_string(i);
+                g_last_error = "Input content cannot be empty (text at index " + std::to_string(i) + ")";
                 return -1;
             }
             all_tokens.push_back(std::move(tokens));

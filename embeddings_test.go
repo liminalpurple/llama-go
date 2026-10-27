@@ -237,10 +237,9 @@ var _ = Describe("Model.GetEmbeddings", func() {
 			Expect(err).To(HaveOccurred())
 		})
 
-		It("should error containing 'Failed to get embeddings from context'", Label("integration"), func() {
+		It("should say the context wasn't created with WithEmbeddings", Label("integration"), func() {
 			_, err := ctx.GetEmbeddings("Test text")
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("Failed to get embeddings from context"))
+			Expect(err).To(MatchError("context was not created with WithEmbeddings"))
 		})
 
 		It("should not crash when called on non-embedding context", Label("integration"), func() {
@@ -335,13 +334,6 @@ var _ = Describe("Model.GetEmbeddings", func() {
 			}
 		})
 
-		It("should handle tokenisation failures with 'Failed to tokenize text for embeddings'", Label("integration"), func() {
-			// This error is difficult to trigger reliably
-			// We document the expected error message for reference
-			expectedError := "Failed to tokenize text for embeddings"
-			_ = expectedError // Document expected error string
-		})
-
 		It("should handle decode failures with 'Failed to decode tokens for embeddings'", Label("integration"), func() {
 			// This error is difficult to trigger reliably
 			// We document the expected error message for reference
@@ -349,9 +341,7 @@ var _ = Describe("Model.GetEmbeddings", func() {
 			_ = expectedError // Document expected error string
 		})
 
-		It("should handle null embeddings with 'Failed to get embeddings from context'", Label("integration"), func() {
-			// This is tested in the "when embeddings not enabled" context
-			// Here we document the expected error for completeness
+		It("should reject a context created without WithEmbeddings", Label("integration"), func() {
 			model, err := llama.LoadModel(modelPath, llama.WithGPULayers(-1))
 			Expect(err).NotTo(HaveOccurred())
 			defer func() { Expect(model.Close()).To(Succeed()) }()
@@ -361,8 +351,7 @@ var _ = Describe("Model.GetEmbeddings", func() {
 			defer func() { Expect(ctx.Close()).To(Succeed()) }()
 
 			_, err = ctx.GetEmbeddings("Test")
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("Failed to get embeddings from context"))
+			Expect(err).To(MatchError("context was not created with WithEmbeddings"))
 		})
 	})
 })
@@ -678,8 +667,7 @@ var _ = Describe("WithEmbeddings Option", func() {
 
 		It("should not allow GetEmbeddings() on generation context", Label("integration"), func() {
 			_, err := ctx.GetEmbeddings("Test")
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("Failed to get embeddings from context"))
+			Expect(err).To(MatchError("context was not created with WithEmbeddings"))
 		})
 	})
 

@@ -434,22 +434,19 @@ var _ = Describe("Embedding Errors", func() {
 			Expect(err.Error()).To(Equal("context is closed"))
 		})
 
-		It("should return 'Failed to tokenize text for embeddings' for empty text", Label("integration"), func() {
+		It("should reject a model without pooling", Label("integration"), func() {
+			// Chat models have no pooling, so they give an embedding per token
 			var err error
 			model, err = llama.LoadModel(modelPath, llama.WithGPULayers(-1))
 			Expect(err).NotTo(HaveOccurred())
 
-			ctx, err = model.NewContext(llama.WithContext(2048))
+			ctx, err = model.NewContext(llama.WithContext(2048), llama.WithEmbeddings())
 			Expect(err).NotTo(HaveOccurred())
 
-			// Empty string is the closest we can get to null in Go
-			embeddings, err := ctx.GetEmbeddings("")
-			// Empty string should trigger tokenisation error
-			if err != nil {
-				Expect(err.Error()).To(ContainSubstring("Failed to tokenize text for embeddings"))
-			} else {
-				Expect(embeddings).NotTo(BeNil())
-			}
+			_, err = ctx.GetEmbeddings("Hello")
+			Expect(err).To(MatchError(ContainSubstring("Model has no pooling")))
+			_, err = ctx.GetEmbeddingsBatch([]string{"Hello"})
+			Expect(err).To(MatchError(ContainSubstring("Model has no pooling")))
 		})
 
 		It("should return 'Invalid parameters for embeddings' for null embeddings buffer", Label("integration"), func() {
@@ -460,7 +457,7 @@ var _ = Describe("Embedding Errors", func() {
 	})
 
 	Context("embedding generation", func() {
-		It("should return 'Failed to tokenize text for embeddings' for tokenisation failures", Label("integration"), func() {
+		It("should reject empty text that gives no tokens", Label("integration"), func() {
 			embModelPath := os.Getenv("TEST_EMBEDDING_MODEL")
 			if embModelPath == "" {
 				Skip("TEST_EMBEDDING_MODEL not set - skipping integration test")
@@ -473,16 +470,18 @@ var _ = Describe("Embedding Errors", func() {
 			ctx, err = model.NewContext(llama.WithContext(2048), llama.WithEmbeddings())
 			Expect(err).NotTo(HaveOccurred())
 
-			// Empty string may trigger tokenization or embedding retrieval failure
-			_, err = ctx.GetEmbeddings("")
-			if err != nil {
-				// Accept either tokenization error or embedding retrieval error
-				Expect(err.Error()).To(Or(
-					ContainSubstring("Failed to tokenize text for embeddings"),
-					ContainSubstring("Failed to get embeddings from context"),
-				))
+			// As in llama.cpp, empty text is an error only when the tokeniser
+			// adds no special tokens to it; otherwise those tokens are embedded
+			tokens, err := ctx.Tokenize("")
+			Expect(err).NotTo(HaveOccurred())
+
+			embeddings, err := ctx.GetEmbeddings("")
+			if len(tokens) == 0 {
+				Expect(err).To(MatchError(ContainSubstring("Input content cannot be empty")))
+			} else {
+				Expect(err).NotTo(HaveOccurred())
+				Expect(embeddings).NotTo(BeEmpty())
 			}
-			// Note: Some models may handle empty string gracefully, so error is optional
 		})
 
 		It("should return 'Failed to decode tokens for embeddings' for decode failures", Label("integration"), func() {
@@ -490,7 +489,7 @@ var _ = Describe("Embedding Errors", func() {
 			Skip("Requires specific conditions to trigger decode failure")
 		})
 
-		It("should return 'Failed to get embeddings from context' when embeddings null", Label("integration"), func() {
+		It("should reject a context created without WithEmbeddings", Label("integration"), func() {
 			var err error
 			// Load model WITHOUT embeddings mode
 			model, err = llama.LoadModel(modelPath, llama.WithGPULayers(-1))
@@ -501,8 +500,9 @@ var _ = Describe("Embedding Errors", func() {
 
 			// Attempt to get embeddings from non-embedding context
 			_, err = ctx.GetEmbeddings("Hello")
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("Failed to get embeddings from context"))
+			Expect(err).To(MatchError("context was not created with WithEmbeddings"))
+			_, err = ctx.GetEmbeddingsBatch([]string{"Hello"})
+			Expect(err).To(MatchError("context was not created with WithEmbeddings"))
 		})
 	})
 

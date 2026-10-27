@@ -163,6 +163,9 @@ func (c *Context) GetEmbeddings(text string) ([]float32, error) {
 	if c.closed {
 		return nil, fmt.Errorf("context is closed")
 	}
+	if !c.config.embeddings {
+		return nil, fmt.Errorf("context was not created with WithEmbeddings")
+	}
 
 	cText := C.CString(text)
 	defer C.free(unsafe.Pointer(cText))
@@ -205,6 +208,9 @@ func (c *Context) GetEmbeddingsBatch(texts []string) ([][]float32, error) {
 
 	if c.closed {
 		return nil, fmt.Errorf("context is closed")
+	}
+	if !c.config.embeddings {
+		return nil, fmt.Errorf("context was not created with WithEmbeddings")
 	}
 
 	if len(texts) == 0 {
