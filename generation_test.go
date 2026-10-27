@@ -799,6 +799,7 @@ var _ = Describe("Generation Edge Cases", func() {
 		It("should prioritise stop words over max_tokens", Label("integration"), func() {
 			response, err := ctx.Generate("The quick brown fox jumps",
 				llama.WithMaxTokens(100),
+				llama.WithTemperature(0),
 				llama.WithStopWords("over"),
 			)
 			Expect(err).NotTo(HaveOccurred())
