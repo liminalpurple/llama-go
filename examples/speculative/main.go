@@ -1,10 +1,10 @@
 // Speculative example demonstrates speculative decoding for faster generation.
 //
 // This program loads two models - a large target model and a smaller draft
-// model - and uses speculative decoding to accelerate text generation. The
-// draft model generates candidate tokens which the target model verifies in
-// parallel, reducing overall latency whilst maintaining the target model's
-// quality.
+// model - and creates a context on the target that speculates with the draft.
+// The draft model proposes several tokens at a time, which the target model
+// verifies in one pass, so output matches the target model alone but arrives
+// sooner when the draft predicts well.
 //
 // Usage:
 //
@@ -12,18 +12,10 @@
 //
 // Speculative decoding works best when:
 //   - The draft model is significantly smaller than the target (e.g. 1-3B vs 70B)
-//   - Both models share similar vocabularies and tokenisation
-//   - Generation requires many tokens (speedup compounds over longer outputs)
+//   - Both models share a vocabulary and tokenisation
+//   - Generation produces many tokens (speedup compounds over longer outputs)
 //
-// The example demonstrates:
-//   - Loading and managing multiple models simultaneously
-//   - Configuring speculative decoding with draft token count
-//   - Measuring performance improvements from speculation
-//   - Proper resource cleanup for multiple model instances
-//
-// Typical speedups range from 1.5× to 3× depending on model sizes and acceptance
-// rates. The technique is particularly effective for large models where inference
-// latency is high.
+// Pass -debug to see how many drafted tokens the target accepts at each step.
 package main
 
 import (
@@ -44,7 +36,7 @@ func main() {
 		context     = flag.Int("c", 2048, "context size")
 		gpuLayers   = flag.Int("ngl", -1, "number of GPU layers (-1 for all)")
 		temp        = flag.Float64("temp", 0.7, "temperature for sampling")
-		draftTokens = flag.Int("draft-tokens", 16, "number of draft tokens per iteration")
+		draftTokens = flag.Int("draft-tokens", 16, "most tokens the draft model proposes per step")
 		debug       = flag.Bool("debug", false, "enable debug output")
 	)
 	flag.Parse()
@@ -65,23 +57,7 @@ func main() {
 		}
 	}()
 
-	// Create target context
-	targetCtx, err := target.NewContext(
-		llama.WithContext(*context),
-		llama.WithThreads(runtime.NumCPU()),
-		llama.WithF16Memory(),
-	)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating target context: %v\n", err)
-		os.Exit(1)
-	}
-	defer func() {
-		if err := targetCtx.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error closing target context: %v\n", err)
-		}
-	}()
-
-	// Load draft model
+	// Load draft model, which must stay open while the context uses it
 	fmt.Printf("Loading draft model: %s\n", *draftModel)
 	draft, err := llama.LoadModel(*draftModel,
 		llama.WithGPULayers(*gpuLayers),
@@ -97,36 +73,37 @@ func main() {
 		}
 	}()
 
-	// Create draft context
-	draftCtx, err := draft.NewContext(
+	// Create a target context that speculates with the draft model
+	ctx, err := target.NewContext(
 		llama.WithContext(*context),
 		llama.WithThreads(runtime.NumCPU()),
 		llama.WithF16Memory(),
+		llama.WithDraft(draft),
+		llama.WithDraftTokens(*draftTokens),
 	)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error creating draft context: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error creating context: %v\n", err)
 		os.Exit(1)
 	}
 	defer func() {
-		if err := draftCtx.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error closing draft context: %v\n", err)
+		if err := ctx.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error closing context: %v\n", err)
 		}
 	}()
 
 	fmt.Printf("Models loaded successfully.\n")
 	fmt.Printf("Prompt: %s\n", *prompt)
-	fmt.Printf("Using speculative sampling with %d draft tokens per iteration\n", *draftTokens)
+	fmt.Printf("Speculating with up to %d draft tokens per step\n", *draftTokens)
 
-	// Generate with speculative sampling
-	var opts []llama.GenerateOption
-	opts = append(opts, llama.WithMaxTokens(*maxTokens))
-	opts = append(opts, llama.WithTemperature(float32(*temp)))
-	opts = append(opts, llama.WithDraftTokens(*draftTokens))
+	opts := []llama.GenerateOption{
+		llama.WithMaxTokens(*maxTokens),
+		llama.WithTemperature(float32(*temp)),
+	}
 	if *debug {
 		opts = append(opts, llama.WithDebug())
 	}
 
-	response, err := targetCtx.GenerateWithDraft(*prompt, draftCtx, opts...)
+	response, err := ctx.Generate(*prompt, opts...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error generating text: %v\n", err)
 		os.Exit(1)

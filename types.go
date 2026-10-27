@@ -14,10 +14,14 @@ type contextConfig struct {
 	nParallel     int // Number of parallel sequences (for batch embeddings)
 	f16Memory     bool
 	embeddings    bool
-	prefixCaching bool   // Enable KV cache prefix reuse (default: true)
-	swaFull       bool   // Full-size cache for sliding-window layers (default: false)
-	kvCacheType   string // KV cache quantization type: "f16", "q8_0", "q4_0" (default: "q8_0")
-	flashAttn     string // Flash Attention mode: "auto", "enabled", "disabled" (default: "auto")
+	prefixCaching bool // Enable KV cache prefix reuse (default: true)
+	swaFull       bool // Full-size cache for sliding-window layers (default: false)
+
+	// Speculative decoding; nil draftModel means none
+	draftModel  *Model
+	draftTokens int    // Maximum drafted tokens per step (default: 16)
+	kvCacheType string // KV cache quantization type: "f16", "q8_0", "q4_0" (default: "q8_0")
+	flashAttn   string // Flash Attention mode: "auto", "enabled", "disabled" (default: "auto")
 
 	// RoPE/YaRN overrides; empty or nil means use the model's own value
 	ropeScaling    string
@@ -40,7 +44,6 @@ type generateConfig struct {
 	temperature float32
 	seed        int
 	stopWords   []string
-	draftTokens int
 	debug       bool
 
 	// Basic sampling parameters
@@ -100,6 +103,7 @@ var defaultContextConfig = contextConfig{
 	prefixCaching: true,   // Enable by default for performance
 	kvCacheType:   "q8_0", // 50% VRAM savings with ~0.1% quality loss
 	flashAttn:     "auto", // Let llama.cpp choose optimal path
+	draftTokens:   16,
 }
 
 var defaultGenerateConfig = generateConfig{
@@ -107,7 +111,6 @@ var defaultGenerateConfig = generateConfig{
 	maxTokens:   128,
 	temperature: 0.8,
 	seed:        -1,
-	draftTokens: 16,
 	debug:       false,
 
 	// Basic sampling parameters

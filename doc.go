@@ -111,14 +111,14 @@
 //	defer target.Close()
 //	defer draft.Close()
 //
-//	result, err := target.GenerateWithDraft(
-//	    "Once upon a time",
-//	    draft,
-//	    llama.WithDraftTokens(5),
-//	)
+//	ctx, _ := target.NewContext(llama.WithDraft(draft), llama.WithDraftTokens(8))
+//	defer ctx.Close()
 //
-// The draft model generates candidate tokens that the target model verifies
-// in parallel, reducing overall latency whilst maintaining quality.
+//	result, err := ctx.Generate("Once upon a time")
+//
+// The draft model proposes candidate tokens that the target model verifies
+// in one pass, reducing overall latency whilst keeping the target's output.
+// Generate, Chat and their streaming variants all speculate on such a context.
 //
 // # Advanced Configuration
 //

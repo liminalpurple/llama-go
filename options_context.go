@@ -314,6 +314,52 @@ func WithSWAFull(enabled bool) ContextOption {
 	}
 }
 
+// WithDraft enables speculative decoding with a smaller draft model.
+//
+// The context creates its own context on the draft model, which proposes
+// several tokens at a time for this context's model to verify in one pass.
+// Generate, Chat and their streaming variants then speculate automatically,
+// and the output is the same as without a draft model. It's fastest when the
+// draft model is much smaller than this one and shares its vocabulary.
+//
+// The draft model must stay open for as long as the context is in use.
+// Speculative decoding needs a generation context with one sequence.
+//
+// Example:
+//
+//	target, _ := llama.LoadModel("large-model.gguf")
+//	draft, _ := llama.LoadModel("small-model.gguf")
+//	ctx, err := target.NewContext(llama.WithDraft(draft))
+func WithDraft(draft *Model) ContextOption {
+	return func(c *contextConfig) {
+		if draft == nil {
+			c.setErr(fmt.Errorf("draft model cannot be nil"))
+			return
+		}
+		c.draftModel = draft
+	}
+}
+
+// WithDraftTokens sets the most tokens the draft model proposes per step.
+//
+// Higher values speed up text the draft predicts well, but waste more work
+// when its predictions are rejected. Capped at one less than the batch size.
+//
+// Default: 16
+//
+// Example:
+//
+//	ctx, err := target.NewContext(llama.WithDraft(draft), llama.WithDraftTokens(8))
+func WithDraftTokens(n int) ContextOption {
+	return func(c *contextConfig) {
+		if n < 1 {
+			c.setErr(fmt.Errorf("draft tokens must be at least 1, got %d", n))
+			return
+		}
+		c.draftTokens = n
+	}
+}
+
 // WithRopeScaling sets the RoPE scaling method used to extend a model beyond
 // the context length it was trained on.
 //

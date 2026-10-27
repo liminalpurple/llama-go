@@ -266,6 +266,19 @@ func (m *Model) NewContext(opts ...ContextOption) (*Context, error) {
 		config.batchSize = config.contextSize
 	}
 
+	// The draft model is held open by the caller; check it now so a closed
+	// one fails here rather than inside llama.cpp
+	var draftPtr unsafe.Pointer
+	if config.draftModel != nil {
+		config.draftModel.mu.RLock()
+		draftClosed := config.draftModel.closed
+		draftPtr = config.draftModel.modelPtr
+		config.draftModel.mu.RUnlock()
+		if draftClosed {
+			return nil, fmt.Errorf("draft model is closed")
+		}
+	}
+
 	// Convert Go config to C struct for context creation
 	var cKVCacheType *C.char
 	if config.kvCacheType != "" {
@@ -298,6 +311,8 @@ func (m *Model) NewContext(opts ...ContextOption) (*Context, error) {
 		mmap:            false, // Not used for context creation
 		embeddings:      C.bool(config.embeddings),
 		swa_full:        C.bool(config.swaFull),
+		draft_model:     draftPtr,
+		n_draft:         C.int(config.draftTokens),
 		main_gpu:        nil, // Not used for context creation
 		tensor_split:    nil, // Not used for context creation
 		kv_cache_type:   cKVCacheType,

@@ -134,27 +134,6 @@ func WithStopWords(words ...string) GenerateOption {
 	}
 }
 
-// WithDraftTokens sets the number of speculative tokens for draft model usage.
-//
-// When using GenerateWithDraft, the draft model speculatively generates this
-// many tokens per iteration. Higher values increase potential speedup but
-// waste more work if predictions are rejected. Typical range: 4-32 tokens.
-//
-// Default: 16
-//
-// Example:
-//
-//	target, _ := llama.LoadModel("large-model.gguf")
-//	draft, _ := llama.LoadModel("small-model.gguf")
-//	text, err := target.GenerateWithDraft("Write a story", draft,
-//	    llama.WithDraftTokens(8),
-//	)
-func WithDraftTokens(n int) GenerateOption {
-	return func(c *generateConfig) {
-		c.draftTokens = n
-	}
-}
-
 // WithDebug enables verbose logging for generation internals.
 //
 // When enabled, prints detailed information about token sampling, timing,

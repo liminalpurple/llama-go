@@ -245,7 +245,7 @@ Options use the functional options pattern, separated into ModelOption and Conte
 
 **Context options** (affect execution): `WithContext`, `WithBatch`, `WithUBatch`, `WithThreads`,
 `WithThreadsBatch`, `WithF16Memory`, `WithEmbeddings`, `WithKVCacheType`, `WithFlashAttn`,
-`WithParallel`, `WithPrefixCaching`, `WithSWAFull`
+`WithParallel`, `WithPrefixCaching`, `WithSWAFull`, `WithDraft`, `WithDraftTokens`
 
 **RoPE options** (extend context beyond the training length): `WithRopeScaling`,
 `WithRopeFreqBase`, `WithRopeFreqScale`, `WithYarnExtFactor`, `WithYarnAttnFactor`,
@@ -416,23 +416,23 @@ defer target.Close()
 draft, _ := llama.LoadModel("llama-2-7b.gguf", llama.WithGPULayers(0)) // Keep on CPU
 defer draft.Close()
 
-// Create contexts
-targetCtx, _ := target.NewContext(llama.WithContext(2048))
-defer targetCtx.Close()
-
-draftCtx, _ := draft.NewContext(llama.WithContext(2048))
-defer draftCtx.Close()
-
-// Generate with speculation
-result, _ := targetCtx.GenerateWithDraft(
-    "Write a story about",
-    draftCtx,
-    llama.WithMaxTokens(500),
-    llama.WithDraftTokens(16), // Draft 16 tokens ahead
+// A context on the target that speculates with the draft model
+ctx, _ := target.NewContext(
+    llama.WithContext(2048),
+    llama.WithDraft(draft),
+    llama.WithDraftTokens(16), // Propose up to 16 tokens per step
 )
+defer ctx.Close()
+
+// Generate, Chat and their streaming variants all speculate on this context
+result, _ := ctx.Generate("Write a story about", llama.WithMaxTokens(500))
 
 fmt.Println(result)
 ```
+
+The draft model must stay open while the context uses it. Output matches the target model on its
+own, though at temperature 0 a near-tie between two tokens can resolve differently, since the target
+verifies several tokens per batch rather than one.
 
 **Best results when**:
 
