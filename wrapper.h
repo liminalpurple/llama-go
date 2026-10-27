@@ -186,12 +186,14 @@ void llama_wrapper_free_parsed_message(llama_wrapper_parsed_message* msg);
 // Chat templates from model metadata, or from template_override when non-NULL
 void* llama_wrapper_chat_templates_init(void* model, const char* template_override);
 void llama_wrapper_chat_templates_free(void* templates);
+// Whether the template can switch thinking on and off: 1 = yes, 0 = no, -1 = error
+int llama_wrapper_chat_templates_support_thinking(void* templates);
 
 // Chat session: renders the prompt with the Jinja chat template and parses the
 // model's output with the parser built from the same render.
 // enable_thinking: -1 = template default, 0 = off, 1 = on.
 // Returns NULL on error. Free with llama_wrapper_chat_session_free().
-void* llama_wrapper_chat_session_new(void* templates, const char** roles, const char** contents,
+void* llama_wrapper_chat_session_new(void* model, void* templates, const char** roles, const char** contents,
                                      int n_messages, llama_wrapper_reasoning_format format,
                                      int enable_thinking);
 void llama_wrapper_chat_session_free(void* session);

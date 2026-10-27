@@ -20,7 +20,8 @@ var _ = Describe("Reasoning", func() {
 	}
 
 	BeforeEach(func() {
-		// Qwen3 emits <think> blocks, so the chat model doubles as the reasoning model
+		// The chat model doubles as the reasoning model; models whose template has no
+		// thinking support skip these tests
 		testModelPath := os.Getenv("TEST_CHAT_MODEL")
 		if testModelPath == "" {
 			Skip("TEST_CHAT_MODEL environment variable not set")
@@ -32,6 +33,12 @@ var _ = Describe("Reasoning", func() {
 
 		ctx, err = model.NewContext(llama.WithContext(4096))
 		Expect(err).NotTo(HaveOccurred())
+
+		supported, err := model.SupportsThinking()
+		Expect(err).NotTo(HaveOccurred())
+		if !supported {
+			Skip("chat template doesn't support thinking")
+		}
 	})
 
 	AfterEach(func() {
@@ -44,19 +51,32 @@ var _ = Describe("Reasoning", func() {
 	})
 
 	Describe("Parsing output", Label("integration", "chat", "reasoning"), func() {
-		output := "<think>\nTwo plus two.\n</think>\n\nFour"
+		thinking := llama.ChatOptions{EnableThinking: llama.Bool(true)}
 
-		It("should extract reasoning with ReasoningFormatAuto", func() {
-			content, reasoning, err := llama.ParseChatOutput(model, messages,
-				llama.ChatOptions{ReasoningFormat: llama.ReasoningFormatAuto}, output)
+		// What the model would write with thinking on: some templates open
+		// the thinking block at the end of the prompt, so the model's output
+		// starts inside it
+		var output string
+		BeforeEach(func() {
+			prompt, err := model.FormatChatPrompt(messages, thinking)
+			Expect(err).NotTo(HaveOccurred())
+			output = "\nTwo plus two.\n</think>\n\nFour"
+			if !strings.HasSuffix(strings.TrimSpace(prompt), "<think>") {
+				output = "<think>" + output
+			}
+		})
+
+		It("should extract reasoning by default", func() {
+			content, reasoning, err := llama.ParseChatOutput(model, messages, thinking, output)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(strings.TrimSpace(reasoning)).To(Equal("Two plus two."))
 			Expect(strings.TrimSpace(content)).To(Equal("Four"))
 		})
 
 		It("should leave reasoning inline with ReasoningFormatNone", func() {
-			content, reasoning, err := llama.ParseChatOutput(model, messages,
-				llama.ChatOptions{ReasoningFormat: llama.ReasoningFormatNone}, output)
+			inline := thinking
+			inline.ReasoningFormat = llama.ReasoningFormatNone
+			content, reasoning, err := llama.ParseChatOutput(model, messages, inline, output)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(reasoning).To(BeEmpty())
 			Expect(content).To(ContainSubstring("<think>"))
@@ -64,9 +84,11 @@ var _ = Describe("Reasoning", func() {
 		})
 
 		It("should give the same result when fed in pieces", func() {
-			content, reasoning, err := llama.ParseChatOutput(model, messages,
-				llama.ChatOptions{ReasoningFormat: llama.ReasoningFormatAuto},
-				"<thi", "nk>\nTwo plus", " two.\n</th", "ink>\n\nFo", "ur")
+			var pieces []string
+			for i := 0; i < len(output); i += 4 {
+				pieces = append(pieces, output[i:min(i+4, len(output))])
+			}
+			content, reasoning, err := llama.ParseChatOutput(model, messages, thinking, pieces...)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(strings.TrimSpace(reasoning)).To(Equal("Two plus two."))
 			Expect(strings.TrimSpace(content)).To(Equal("Four"))
@@ -102,6 +124,17 @@ var _ = Describe("Reasoning", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response.ReasoningContent).NotTo(BeEmpty())
 			Expect(response.Content).NotTo(ContainSubstring("<think>"))
+		})
+
+		It("should leave the template's empty thinking block out of content by default", func() {
+			response, err := ctx.Chat(context.Background(), messages, llama.ChatOptions{
+				MaxTokens:      llama.Int(64),
+				Temperature:    llama.Float32(0),
+				EnableThinking: llama.Bool(false),
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(response.Content).NotTo(ContainSubstring("think>"))
+			Expect(response.Content).NotTo(BeEmpty())
 		})
 
 		It("should return no reasoning when thinking is off", func() {

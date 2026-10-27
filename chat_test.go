@@ -75,9 +75,10 @@ var _ = Describe("Chat API", func() {
 
 				bgCtx := context.Background()
 				response, err := ctx.Chat(bgCtx, messages, llama.ChatOptions{
-					MaxTokens:   llama.Int(50),
-					Temperature: llama.Float32(0.0), // Deterministic
-					Seed:        llama.Int(42),
+					MaxTokens:      llama.Int(50),
+					EnableThinking: llama.Bool(false),  // Leave the whole budget for content
+					Temperature:    llama.Float32(0.0), // Deterministic
+					Seed:           llama.Int(42),
 				})
 
 				Expect(err).NotTo(HaveOccurred())
@@ -94,8 +95,9 @@ var _ = Describe("Chat API", func() {
 
 				bgCtx := context.Background()
 				response, err := ctx.Chat(bgCtx, messages, llama.ChatOptions{
-					MaxTokens:   llama.Int(10),
-					Temperature: llama.Float32(0.0),
+					MaxTokens:      llama.Int(10),
+					EnableThinking: llama.Bool(false), // Leave the whole budget for content
+					Temperature:    llama.Float32(0.0),
 				})
 
 				Expect(err).NotTo(HaveOccurred())
@@ -168,8 +170,9 @@ var _ = Describe("Chat API", func() {
 
 				bgCtx := context.Background()
 				response, err := ctx.Chat(bgCtx, messages, llama.ChatOptions{
-					MaxTokens:   llama.Int(20),
-					Temperature: llama.Float32(1.5), // High temperature
+					MaxTokens:      llama.Int(20),
+					EnableThinking: llama.Bool(false),  // Leave the whole budget for content
+					Temperature:    llama.Float32(1.5), // High temperature
 				})
 
 				Expect(err).NotTo(HaveOccurred())
@@ -182,9 +185,10 @@ var _ = Describe("Chat API", func() {
 				}
 
 				opts := llama.ChatOptions{
-					MaxTokens:   llama.Int(20),
-					Temperature: llama.Float32(0.0),
-					Seed:        llama.Int(12345),
+					MaxTokens:      llama.Int(20),
+					EnableThinking: llama.Bool(false), // Leave the whole budget for content
+					Temperature:    llama.Float32(0.0),
+					Seed:           llama.Int(12345),
 				}
 
 				bgCtx := context.Background()
@@ -208,9 +212,10 @@ var _ = Describe("Chat API", func() {
 
 				bgCtx := context.Background()
 				deltaCh, errCh := ctx.ChatStream(bgCtx, messages, llama.ChatOptions{
-					MaxTokens:   llama.Int(50),
-					Temperature: llama.Float32(0.0),
-					Seed:        llama.Int(42),
+					MaxTokens:      llama.Int(50),
+					EnableThinking: llama.Bool(false), // Leave the whole budget for content
+					Temperature:    llama.Float32(0.0),
+					Seed:           llama.Int(42),
 				})
 
 				var fullContent strings.Builder
@@ -340,7 +345,8 @@ var _ = Describe("Chat API", func() {
 
 				bgCtx := context.Background()
 				response1, err := ctx.Chat(bgCtx, messages, llama.ChatOptions{
-					MaxTokens: llama.Int(50),
+					MaxTokens:      llama.Int(50),
+					EnableThinking: llama.Bool(false), // Leave the whole budget for content
 				})
 
 				Expect(err).NotTo(HaveOccurred())
@@ -357,7 +363,8 @@ var _ = Describe("Chat API", func() {
 				})
 
 				response2, err := ctx.Chat(bgCtx, messages, llama.ChatOptions{
-					MaxTokens: llama.Int(50),
+					MaxTokens:      llama.Int(50),
+					EnableThinking: llama.Bool(false),
 				})
 
 				Expect(err).NotTo(HaveOccurred())

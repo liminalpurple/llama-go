@@ -27,6 +27,20 @@ type chatSession struct {
 //
 // The template priority is: opts.ChatTemplate > model's GGUF template > error.
 // For raw completion without templates, use Generate() instead of Chat().
+// toC converts a ReasoningFormat to llama.cpp's enum
+func (r ReasoningFormat) toC() C.llama_wrapper_reasoning_format {
+	switch r {
+	case ReasoningFormatNone:
+		return C.REASONING_FORMAT_NONE
+	case ReasoningFormatDeepSeekLegacy:
+		return C.REASONING_FORMAT_DEEPSEEK_LEGACY
+	case ReasoningFormatDeepSeek:
+		return C.REASONING_FORMAT_DEEPSEEK
+	default:
+		return C.REASONING_FORMAT_AUTO
+	}
+}
+
 func newChatSession(m *Model, messages []ChatMessage, opts ChatOptions, format ReasoningFormat) (*chatSession, error) {
 	if len(messages) == 0 {
 		return nil, fmt.Errorf("messages cannot be empty")
@@ -74,11 +88,12 @@ func newChatSession(m *Model, messages []ChatMessage, opts ChatOptions, format R
 	}
 
 	ptr := C.llama_wrapper_chat_session_new(
+		m.modelPtr,
 		templates,
 		(**C.char)(unsafe.Pointer(&cRoles[0])),
 		(**C.char)(unsafe.Pointer(&cContents[0])),
 		C.int(len(messages)),
-		C.llama_wrapper_reasoning_format(format),
+		format.toC(),
 		enableThinking,
 	)
 	if ptr == nil {

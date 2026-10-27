@@ -36,14 +36,21 @@ static void llama_log_callback(ggml_log_level level, const char * text, void * /
     }
 }
 
-// Pass a chat session's generation prompt and thinking tags to the sampler, so
-// it starts in the right reasoning state and can enforce the thinking budget.
+// Chat session plus a stable copy of its rendered prompt for the C API
+struct llama_wrapper_chat_session_t {
+    common_chat_session session;
+    std::string prompt;
+};
+
+// Apply a chat session's sampling settings (generation prompt, grammar and
+// the tokens it preserves) and its thinking tags, so the sampler starts in
+// the right reasoning state and can enforce the thinking budget.
 static void apply_chat_session_sampling(common_params_sampling & sampling, const llama_model * model,
                                         void * chat_session, int reasoning_budget) {
     if (!chat_session) return;
-    auto session = static_cast<const common_chat_session*>(chat_session);
+    const auto * session = &static_cast<const llama_wrapper_chat_session_t*>(chat_session)->session;
 
-    sampling.generation_prompt = session->generation_prompt();
+    session->apply_sampling(sampling);
 
     if (reasoning_budget < 0 || session->thinking_start_tag().empty() || session->thinking_end_tags().empty()) {
         return;
@@ -1125,16 +1132,23 @@ void llama_wrapper_chat_templates_free(void* templates) {
     common_chat_templates_free(static_cast<common_chat_templates*>(templates));
 }
 
-// Chat session plus a stable copy of its rendered prompt for the C API
-struct llama_wrapper_chat_session_t {
-    common_chat_session session;
-    std::string prompt;
-};
+int llama_wrapper_chat_templates_support_thinking(void* templates) {
+    if (!templates) {
+        g_last_error = "Templates cannot be null";
+        return -1;
+    }
+    try {
+        return common_chat_templates_support_enable_thinking(static_cast<common_chat_templates*>(templates)) ? 1 : 0;
+    } catch (const std::exception& e) {
+        g_last_error = "Failed to apply chat template: " + std::string(e.what());
+        return -1;
+    }
+}
 
-void* llama_wrapper_chat_session_new(void* templates, const char** roles, const char** contents,
+void* llama_wrapper_chat_session_new(void* model, void* templates, const char** roles, const char** contents,
                                      int n_messages, llama_wrapper_reasoning_format format,
                                      int enable_thinking) {
-    if (!templates || !roles || !contents || n_messages <= 0) {
+    if (!model || !templates || !roles || !contents || n_messages <= 0) {
         g_last_error = "Invalid parameters for chat session";
         return nullptr;
     }
@@ -1158,10 +1172,12 @@ void* llama_wrapper_chat_session_new(void* templates, const char** roles, const 
             inputs.messages.push_back(std::move(msg));
         }
 
-        // No vocab: generated text is fed back as text, and the sampler side
-        // tokenises the generation prompt and thinking tags itself
+        // The vocab lets the session tokenise its grammar triggers and
+        // preserved tokens. Generated text is fed back as text, which the
+        // parser matches on.
+        const llama_vocab* vocab = llama_model_get_vocab(static_cast<llama_wrapper_model_t*>(model)->model);
         auto* wrapper = new llama_wrapper_chat_session_t{
-            common_chat_session(static_cast<common_chat_templates*>(templates), nullptr, inputs),
+            common_chat_session(static_cast<common_chat_templates*>(templates), vocab, inputs),
             "",
         };
         wrapper->prompt = wrapper->session.prompt().str();

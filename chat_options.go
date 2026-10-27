@@ -36,7 +36,7 @@ type ChatOptions struct {
 	// Reasoning model options (for models like DeepSeek-R1)
 	EnableThinking  *bool           // Enable/disable thinking output (nil = model default)
 	ReasoningBudget *int            // Token limit for reasoning (-1 = unlimited, 0 = disabled)
-	ReasoningFormat ReasoningFormat // How to handle reasoning content
+	ReasoningFormat ReasoningFormat // How to handle reasoning content (default: ReasoningFormatAuto)
 
 	// Streaming configuration
 	StreamBufferSize int // Buffer size for streaming channels (default: 256)
@@ -48,17 +48,20 @@ type ChatOptions struct {
 // Reasoning models typically emit content within special tags like
 // <think>...</think>. These formats control whether that content is
 // extracted into separate ReasoningContent fields or left inline.
+//
+// The zero value is ReasoningFormatAuto, matching llama.cpp's default.
 type ReasoningFormat int
 
 const (
-	// ReasoningFormatNone leaves reasoning content inline with regular content.
-	// All tokens appear in Content/delta.Content fields.
-	ReasoningFormatNone ReasoningFormat = iota
-
 	// ReasoningFormatAuto extracts reasoning to ReasoningContent field.
 	// Tokens inside reasoning tags go to ReasoningContent, others to Content.
-	// This is the recommended format for reasoning models.
-	ReasoningFormatAuto
+	// This is the default.
+	ReasoningFormatAuto ReasoningFormat = iota
+
+	// ReasoningFormatNone leaves reasoning content inline with regular content.
+	// All tokens appear in Content/delta.Content fields, including any
+	// thinking block the chat template adds to the end of the prompt.
+	ReasoningFormatNone
 
 	// ReasoningFormatDeepSeekLegacy extracts in non-streaming mode only.
 	// For streaming: reasoning stays inline. For Chat(): extracted.

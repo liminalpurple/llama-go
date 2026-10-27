@@ -452,6 +452,37 @@ func (m *Model) FormatChatPrompt(messages []ChatMessage, opts ChatOptions) (stri
 	return session.prompt(), nil
 }
 
+// SupportsThinking reports whether the model's chat template supports
+// reasoning, so that ChatOptions.EnableThinking switches it on and off and
+// thinking can be separated into ReasoningContent.
+//
+// Example:
+//
+//	if ok, _ := model.SupportsThinking(); ok {
+//	    opts.EnableThinking = llama.Bool(true)
+//	}
+func (m *Model) SupportsThinking() (bool, error) {
+	templates, err := m.getChatTemplates()
+	if err != nil {
+		return false, err
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.closed {
+		return false, fmt.Errorf("model is closed")
+	}
+
+	switch C.llama_wrapper_chat_templates_support_thinking(templates) {
+	case 1:
+		return true, nil
+	case 0:
+		return false, nil
+	default:
+		return false, fmt.Errorf("%s", C.GoString(C.llama_wrapper_last_error()))
+	}
+}
+
 // getChatTemplates returns the model's chat templates, loading them on first use.
 func (m *Model) getChatTemplates() (unsafe.Pointer, error) {
 	m.mu.Lock()
