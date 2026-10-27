@@ -143,14 +143,15 @@ void llama_wrapper_tokenize_alloc(void* ctx, const char* text, int** tokens, int
 // Free tokens allocated by llama_wrapper_tokenize_alloc
 void llama_wrapper_free_tokens(int* tokens);
 
-// Embeddings
+// Embeddings: embeddings must have space for llama_wrapper_model_n_embd_out floats.
+// Returns the number of floats written, or -1 on error.
 int llama_wrapper_embeddings(void* ctx, const char* text, float* embeddings, int max_embeddings);
 
 // Batch embeddings - process multiple texts efficiently
 // texts: array of text strings to embed
 // n_texts: number of texts in the array
 // embeddings: output buffer (must have space for n_texts * n_embd floats)
-// n_embd: embedding dimension from model (llama_model_n_embd)
+// n_embd: output embedding width (llama_wrapper_model_n_embd_out)
 // Returns number of embeddings generated (should equal n_texts), or -1 on error
 int llama_wrapper_embeddings_batch(void* ctx, const char** texts, int n_texts, float* embeddings, int n_embd);
 
@@ -162,8 +163,8 @@ int llama_wrapper_get_cached_token_count(void* ctx);
 // Get model's native maximum context length
 int llama_wrapper_get_model_context_length(void* model);
 
-// Get model's embedding dimension
-int llama_wrapper_model_n_embd(void* model);
+// Get the width of the model's output embeddings
+int llama_wrapper_model_n_embd_out(void* model);
 
 // Chat template support
 const char* llama_wrapper_get_chat_template(void* model);

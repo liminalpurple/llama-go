@@ -412,14 +412,14 @@ int llama_wrapper_get_model_context_length(void* model) {
     return (n_ctx_train > 0) ? n_ctx_train : 32768;
 }
 
-// Get model's embedding dimension
-int llama_wrapper_model_n_embd(void* model) {
+// Get the width of the model's output embeddings
+int llama_wrapper_model_n_embd_out(void* model) {
     if (!model) {
         return -1;  // Error if model is null
     }
 
     auto model_wrapper = static_cast<llama_wrapper_model_t*>(model);
-    return llama_model_n_embd(model_wrapper->model);
+    return llama_model_n_embd_out(model_wrapper->model);
 }
 
 // Helper function to find common prefix length between two token vectors
@@ -927,6 +927,11 @@ int llama_wrapper_embeddings(void* ctx, const char* text, float* embeddings, int
     if (!check_pooling(wrapper)) {
         return -1;
     }
+    const int n_embd = llama_model_n_embd_out(wrapper->model);
+    if (max_embeddings < n_embd) {
+        g_last_error = "Embedding buffer is smaller than the model's output width";
+        return -1;
+    }
 
     try {
         // Clear KV cache to ensure clean state
@@ -958,13 +963,8 @@ int llama_wrapper_embeddings(void* ctx, const char* text, float* embeddings, int
             return -1;
         }
 
-        // Copy embeddings
-        int n_embd = llama_model_n_embd(wrapper->model);
-        int count = std::min(n_embd, max_embeddings);
-
-        memcpy(embeddings, embd, count * sizeof(float));
-
-        return count;
+        memcpy(embeddings, embd, n_embd * sizeof(float));
+        return n_embd;
     } catch (const std::exception& e) {
         g_last_error = "Exception during embedding generation: " + std::string(e.what());
         return -1;
@@ -979,6 +979,10 @@ int llama_wrapper_embeddings_batch(void* ctx, const char** texts, int n_texts, f
 
     auto wrapper = static_cast<llama_wrapper_context_t*>(ctx);
     if (!check_pooling(wrapper)) {
+        return -1;
+    }
+    if (n_embd != llama_model_n_embd_out(wrapper->model)) {
+        g_last_error = "Embedding width doesn't match the model's output width";
         return -1;
     }
 

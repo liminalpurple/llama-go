@@ -394,33 +394,22 @@ var _ = Describe("Embedding Vector Properties", func() {
 			// Dimension is model-specific, verify it's positive
 		})
 
-		It("should match llama_model_n_embd() value", Label("integration"), func() {
+		It("should give every text the same width", Label("integration"), func() {
 			embeddings, err := ctx.GetEmbeddings("Test")
 			Expect(err).NotTo(HaveOccurred())
-			// The actual dimension is returned from llama_model_n_embd()
-			// We verify it's consistent across calls
-			embeddings2, err := ctx.GetEmbeddings("Different")
+			embeddings2, err := ctx.GetEmbeddings("A rather longer and quite different sentence.")
 			Expect(err).NotTo(HaveOccurred())
-			Expect(len(embeddings)).To(Equal(len(embeddings2)))
+			Expect(len(embeddings2)).To(Equal(len(embeddings)))
 		})
 
-		It("should use maximum buffer size 4096", Label("integration"), func() {
+		It("should give single and batch embeddings the same width", Label("integration"), func() {
 			embeddings, err := ctx.GetEmbeddings("Test")
 			Expect(err).NotTo(HaveOccurred())
-			// Buffer limit is 4096 floats - verify we don't exceed it
-			Expect(len(embeddings)).To(BeNumerically("<=", 4096))
-		})
-
-		It("should not exceed 4096 floats", Label("integration"), func() {
-			// Test with longer text to ensure buffer limit is respected
-			longText := ""
-			for i := 0; i < 100; i++ {
-				longText += "This is a longer sentence to test embedding dimension limits. "
+			batch, err := ctx.GetEmbeddingsBatch([]string{"Test", "Another"})
+			Expect(err).NotTo(HaveOccurred())
+			for _, e := range batch {
+				Expect(len(e)).To(Equal(len(embeddings)))
 			}
-
-			embeddings, err := ctx.GetEmbeddings(longText)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(len(embeddings)).To(BeNumerically("<=", 4096))
 		})
 	})
 

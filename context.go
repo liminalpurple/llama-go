@@ -167,13 +167,17 @@ func (c *Context) GetEmbeddings(text string) ([]float32, error) {
 		return nil, fmt.Errorf("context was not created with WithEmbeddings")
 	}
 
+	nEmbd := int(C.llama_wrapper_model_n_embd_out(c.model.modelPtr))
+	if nEmbd <= 0 {
+		return nil, fmt.Errorf("invalid embedding dimension: %d", nEmbd)
+	}
+
 	cText := C.CString(text)
 	defer C.free(unsafe.Pointer(cText))
 
-	maxEmbeddings := 4096
-	embeddings := make([]C.float, maxEmbeddings)
+	embeddings := make([]C.float, nEmbd)
 
-	count := C.llama_wrapper_embeddings(c.contextPtr, cText, &embeddings[0], C.int(maxEmbeddings))
+	count := C.llama_wrapper_embeddings(c.contextPtr, cText, &embeddings[0], C.int(nEmbd))
 	if count < 0 {
 		return nil, fmt.Errorf("embedding generation failed: %s", C.GoString(C.llama_wrapper_last_error()))
 	}
@@ -217,8 +221,8 @@ func (c *Context) GetEmbeddingsBatch(texts []string) ([][]float32, error) {
 		return nil, fmt.Errorf("no texts provided")
 	}
 
-	// Get embedding dimension from model
-	nEmbd := int(C.llama_wrapper_model_n_embd(c.model.modelPtr))
+	// Get the width of the model's output embeddings
+	nEmbd := int(C.llama_wrapper_model_n_embd_out(c.model.modelPtr))
 	if nEmbd <= 0 {
 		return nil, fmt.Errorf("invalid embedding dimension: %d", nEmbd)
 	}
