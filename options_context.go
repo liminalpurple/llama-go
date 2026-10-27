@@ -291,6 +291,29 @@ func WithPrefixCaching(enabled bool) ContextOption {
 	}
 }
 
+// WithSWAFull keeps the whole context in the cache of sliding-window layers.
+//
+// Models such as Gemma 2/3/4 attend over a limited window in some layers. By
+// default those layers only cache the window, which saves a lot of memory at
+// long context sizes: for Gemma 3 4B at 128k context, roughly 90 MiB instead
+// of nearly 8 GiB. Prefix caching then resumes from a checkpoint saved at the
+// end of the previous prompt, so a new prompt that diverges partway through
+// the previous one is processed again from the start.
+//
+// With a full-size cache, prefix caching can resume from any shared prefix, at
+// the cost of that memory. Models without sliding-window layers are unaffected.
+//
+// Default: false
+//
+// Example:
+//
+//	ctx, err := model.NewContext(llama.WithSWAFull(true))
+func WithSWAFull(enabled bool) ContextOption {
+	return func(c *contextConfig) {
+		c.swaFull = enabled
+	}
+}
+
 // WithRopeScaling sets the RoPE scaling method used to extend a model beyond
 // the context length it was trained on.
 //
@@ -461,6 +484,7 @@ func (c *contextConfig) setErr(err error) {
 // - f16Memory: false
 // - embeddings: false
 // - prefixCaching: true
+// - swaFull: false
 // - kvCacheType: "q8_0"
 // - flashAttn: "auto"
 func init() {

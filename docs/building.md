@@ -365,7 +365,7 @@ ctx, _ := model.NewContext(
     llama.WithKVCacheType("q8_0"),  // Quantized KV cache (saves VRAM)
     llama.WithFlashAttn(),          // Enable Flash Attention (faster)
     llama.WithParallel(4),          // Number of parallel sequences
-    llama.WithPrefixCaching(),      // Cache common prompt prefixes
+    llama.WithPrefixCaching(true),  // Cache common prompt prefixes
 )
 ```
 

@@ -115,7 +115,12 @@ struct llama_wrapper_model_t {
 struct llama_wrapper_context_t {
     llama_context* ctx;
     llama_model* model;  // Reference to parent model
-    std::vector<int> cached_tokens;  // Cache for prefix matching optimisation
+    std::vector<int> cached_tokens;  // Prompt tokens currently held in memory for sequence 0
+    // Recurrent, hybrid and sliding-window memory can't be trimmed to an
+    // arbitrary position, so reuse restores a checkpoint saved before the last
+    // prompt token instead
+    bool needs_checkpoint = false;
+    common_prompt_checkpoint checkpoint;
 };
 
 const char* llama_wrapper_last_error() {
@@ -180,6 +185,7 @@ static struct llama_context_params convert_context_params(llama_wrapper_model_pa
     ctx_params.n_threads_batch = params.n_threads_batch > 0 ? params.n_threads_batch : ctx_params.n_threads;
     ctx_params.n_seq_max = params.n_parallel > 0 ? params.n_parallel : 1;
     ctx_params.embeddings = params.embeddings;
+    ctx_params.swa_full = params.swa_full;
 
     // Set KV cache quantization type
     if (params.kv_cache_type != nullptr) {
@@ -300,6 +306,19 @@ void* llama_wrapper_context_create(void* model, llama_wrapper_model_params param
         ctx_wrapper->ctx = ctx;
         ctx_wrapper->model = model_wrapper->model;  // Keep reference to parent model
 
+        // Probe how the memory can be trimmed (this decodes two tokens, so
+        // do it once here). A window-sized SWA cache drops positions as it
+        // goes, so it needs checkpoints too. A batch too small to probe gets
+        // checkpoints, which fall back to a full clear on any memory type.
+        // Embedding contexts never reuse memory.
+        if (!params.embeddings && llama_n_batch(ctx) < 2) {
+            ctx_wrapper->needs_checkpoint = true;
+        } else if (!params.embeddings) {
+            const auto rm_type = common_context_can_seq_rm(ctx);
+            ctx_wrapper->needs_checkpoint = rm_type != COMMON_CONTEXT_SEQ_RM_TYPE_PART ||
+                                            (llama_model_n_swa(model_wrapper->model) > 0 && !ctx_params.swa_full);
+        }
+
         return ctx_wrapper;
     } catch (const std::exception& e) {
         g_last_error = "Exception creating context: " + std::string(e.what());
@@ -398,13 +417,32 @@ char* llama_wrapper_generate_with_tokens(void* ctx, const int* tokens, int n_tok
             return nullptr;
         }
 
-        // Clear KV cache from divergence point onwards
-        // For full cache hits, we'll refresh the last prompt token, so clear from prefix_len - 1
-        // For partial matches, clear from prefix_len as usual
-        int clear_from = (prefix_len == n_tokens && n_tokens > 0) ? prefix_len - 1 : prefix_len;
-        // Only clear if clear_from is valid and within context bounds
-        if (clear_from >= 0 && clear_from < available_ctx) {
-            llama_memory_seq_rm(llama_get_memory(wrapper->ctx), 0, clear_from, -1);
+        // Memory no longer matches cached_tokens until the new prompt is decoded
+        wrapper->cached_tokens.clear();
+
+        // Resume after the shared prefix, always leaving the last prompt token
+        // to decode so its logits are fresh
+        llama_memory_t mem = llama_get_memory(wrapper->ctx);
+        int resume_from = std::min(prefix_len, n_tokens - 1);
+        if (wrapper->needs_checkpoint) {
+            const auto & ckpt = wrapper->checkpoint;
+            if (!ckpt.empty() && ckpt.n_tokens <= resume_from &&
+                ckpt.load_tgt(wrapper->ctx, 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY) &&
+                llama_memory_seq_rm(mem, 0, ckpt.pos_max + 1, -1)) {
+                resume_from = (int)ckpt.n_tokens;
+            } else {
+                resume_from = 0;
+            }
+        }
+        if (resume_from == 0) {
+            wrapper->checkpoint.clear();
+            if (!llama_memory_seq_rm(mem, 0, -1, -1)) {
+                g_last_error = "Failed to clear memory";
+                return nullptr;
+            }
+        } else if (!wrapper->needs_checkpoint && !llama_memory_seq_rm(mem, 0, resume_from, -1)) {
+            g_last_error = "Failed to trim memory to the cached prefix";
+            return nullptr;
         }
 
         // Create sampling parameters - use the struct directly instead of calling a function
@@ -472,66 +510,47 @@ char* llama_wrapper_generate_with_tokens(void* ctx, const int* tokens, int n_tok
         }
         int n_predict = params.max_tokens > 0 ? params.max_tokens : 128;
 
-        // After clearing cache from prefix_len onwards, cache ends at prefix_len - 1
-        // Next position to use is prefix_len
-        int n_past = prefix_len;
-
-        // Process prompt tokens from prefix_len onwards using explicit positions
-        if (prefix_len < n_tokens) {
-            int tokens_to_process = n_tokens - prefix_len;
-            int n_batch = llama_n_batch(wrapper->ctx);
-
-            // Process tokens in chunks that respect n_batch limit
-            for (int chunk_start = 0; chunk_start < tokens_to_process; chunk_start += n_batch) {
-                int chunk_size = std::min(n_batch, tokens_to_process - chunk_start);
-                llama_batch batch = llama_batch_init(chunk_size, 0, 1);
+        // Decode the prompt in n_batch chunks with explicit positions
+        const int n_batch = llama_n_batch(wrapper->ctx);
+        auto decode_prompt = [&](int from, int to, bool logits_last) {
+            for (int start = from; start < to; start += n_batch) {
+                const int size = std::min(n_batch, to - start);
+                llama_batch batch = llama_batch_init(size, 0, 1);
                 batch_clear(batch);
-
-                // Add tokens for this chunk with explicit positions
-                for (int i = 0; i < chunk_size; i++) {
-                    int token_idx = prefix_len + chunk_start + i;
-                    int position = prefix_len + chunk_start + i;
-                    // Only the very last token of the entire prompt needs logits
-                    bool needs_logits = (chunk_start + i == tokens_to_process - 1);
-                    batch_add(batch, prompt_tokens[token_idx], position, { 0 }, needs_logits);
+                for (int pos = start; pos < start + size; pos++) {
+                    batch_add(batch, prompt_tokens[pos], pos, { 0 }, logits_last && pos == to - 1);
                 }
-
-                if (llama_decode(wrapper->ctx, batch) != 0) {
-                    if (params.debug) {
-                        fprintf(stderr, "WARNING: prompt decode failed for chunk starting at %d\n", chunk_start);
-                    }
-                    llama_batch_free(batch);
-                    common_sampler_free(sampler);
-                    g_last_error = "Failed to decode prompt";
-                    return nullptr;
-                }
-
+                const int ret = llama_decode(wrapper->ctx, batch);
                 llama_batch_free(batch);
-            }
-
-            n_past = n_tokens;  // Position now at end of prompt
-        } else if (prefix_len == n_tokens && n_tokens > 0) {
-            // Full cache hit - refresh last token's logits to ensure determinism
-            // This is critical: without this, we sample from stale logits from the previous generation
-            // The last prompt token is at position n_tokens - 1 (0-indexed positions)
-            llama_batch batch = llama_batch_init(512, 0, 1);
-            batch_clear(batch);
-            batch_add(batch, prompt_tokens[n_tokens - 1], n_tokens - 1, { 0 }, true);
-
-            if (llama_decode(wrapper->ctx, batch) != 0) {
-                if (params.debug) {
-                    fprintf(stderr, "WARNING: logit refresh failed\n");
+                if (ret != 0) {
+                    return false;
                 }
-                llama_batch_free(batch);
-                common_sampler_free(sampler);
-                g_last_error = "Failed to refresh logits for cached prompt";
-                return nullptr;
             }
+            return true;
+        };
 
-            llama_batch_free(batch);
-            n_past = n_tokens;  // Set position to end of prompt for generation
+        // Decode up to the last prompt token, checkpoint there if this memory
+        // can't be trimmed, then decode the last token for its logits
+        bool prompt_ok = decode_prompt(resume_from, n_tokens - 1, false);
+        if (prompt_ok && params.enable_prefix_caching && wrapper->needs_checkpoint && n_tokens > 1 &&
+            (wrapper->checkpoint.empty() || wrapper->checkpoint.n_tokens != n_tokens - 1)) {
+            wrapper->checkpoint.update_pos(n_tokens - 1,
+                                           llama_memory_seq_pos_min(mem, 0),
+                                           llama_memory_seq_pos_max(mem, 0));
+            wrapper->checkpoint.update_tgt(wrapper->ctx, 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
         }
-        // If n_tokens == 0, nothing to decode
+        prompt_ok = prompt_ok && decode_prompt(n_tokens - 1, n_tokens, true);
+        if (!prompt_ok) {
+            wrapper->checkpoint.clear();
+            common_sampler_free(sampler);
+            g_last_error = "Failed to decode prompt";
+            return nullptr;
+        }
+
+        if (params.enable_prefix_caching) {
+            wrapper->cached_tokens = std::vector<int>(tokens, tokens + n_tokens);
+        }
+        int n_past = n_tokens;
 
         // Generation loop - follows simple.cpp pattern
         std::string result;
@@ -683,19 +702,12 @@ char* llama_wrapper_generate(void* ctx, llama_wrapper_generate_params params) {
         // Convert to int vector for comparison
         std::vector<int> tokens_int(prompt_tokens.begin(), prompt_tokens.end());
 
-        // Find common prefix with cached tokens (only if prefix caching enabled)
+        // Find common prefix with cached tokens (only if prefix caching enabled).
+        // generate_with_tokens records the new prompt once it has decoded.
         int prefix_len = params.enable_prefix_caching
             ? findCommonPrefix(wrapper->cached_tokens, tokens_int)
             : 0;
 
-        // Update cache to new token sequence (only if prefix caching enabled)
-        if (params.enable_prefix_caching) {
-            wrapper->cached_tokens = tokens_int;
-        } else {
-            wrapper->cached_tokens.clear();  // Ensure cache is empty when disabled
-        }
-
-        // Call token-based generation with prefix caching
         return llama_wrapper_generate_with_tokens(ctx, tokens_int.data(), tokens_int.size(), prefix_len, params);
 
     } catch (const std::exception& e) {

@@ -297,6 +297,7 @@ func (m *Model) NewContext(opts ...ContextOption) (*Context, error) {
 		mlock:           false, // Not used for context creation
 		mmap:            false, // Not used for context creation
 		embeddings:      C.bool(config.embeddings),
+		swa_full:        C.bool(config.swaFull),
 		main_gpu:        nil, // Not used for context creation
 		tensor_split:    nil, // Not used for context creation
 		kv_cache_type:   cKVCacheType,

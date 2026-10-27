@@ -1,7 +1,9 @@
 package llama_test
 
 import (
+	"fmt"
 	"os"
+	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -101,6 +103,86 @@ var _ = Describe("Prefix Caching", Label("prefix-caching"), func() {
 			// Results should be identical (same seed, deterministic sampling)
 			Expect(resultWithoutCache).To(Equal(resultWithCache),
 				"Results should be identical regardless of prefix caching when using same seed")
+		})
+
+		// These reuse one context so the cache is trimmed between calls. Recurrent
+		// and sliding-window models can't trim arbitrarily, so a silent trim
+		// failure shows up here as output that differs from a fresh context.
+		// llama.cpp doesn't promise bit-identical logits across different batch
+		// splits, so a prompt where two tokens are almost tied could still differ.
+		Context("after reusing the cache", func() {
+			first := "The capital of France is Paris. The capital of Germany is Berlin. The capital of Italy is"
+			second := "The capital of France is Paris. The capital of Germany is Berlin. The capital of Spain is"
+
+			generateFresh := func(prompt string) string {
+				fresh, err := model.NewContext(llama.WithContext(4096), llama.WithPrefixCaching(false))
+				Expect(err).NotTo(HaveOccurred())
+				defer func() { Expect(fresh.Close()).To(Succeed()) }()
+
+				result, err := fresh.Generate(prompt, llama.WithTemperature(0), llama.WithMaxTokens(20))
+				Expect(err).NotTo(HaveOccurred())
+				return result
+			}
+
+			BeforeEach(func() {
+				var err error
+				ctx, err = model.NewContext(llama.WithContext(4096), llama.WithPrefixCaching(true))
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			// The shared prefix is longer than a typical sliding window (Gemma 3
+			// uses 1024), and the first prompt runs well past it, beyond the
+			// n_ubatch slack the windowed cache keeps, so cells the second prompt
+			// needs have been overwritten by the time it's reused
+			expectLongPrefixReuse := func() {
+				var history, detour strings.Builder
+				for i := 1; i <= 120; i++ {
+					fmt.Fprintf(&history, "Line %d: the lighthouse keeper logged a calm night. ", i)
+				}
+				for i := 1; i <= 60; i++ {
+					fmt.Fprintf(&detour, "Storm note %d: waves broke over the north rocks at dawn. ", i)
+				}
+				longFirst := history.String() + detour.String() + "The keeper's favourite colour was"
+				longSecond := history.String() + "The keeper's cat was called"
+
+				_, err := ctx.Generate(longFirst, llama.WithTemperature(0), llama.WithMaxTokens(20))
+				Expect(err).NotTo(HaveOccurred())
+
+				reused, err := ctx.Generate(longSecond, llama.WithTemperature(0), llama.WithMaxTokens(20))
+				Expect(err).NotTo(HaveOccurred())
+				Expect(reused).To(Equal(generateFresh(longSecond)))
+			}
+
+			It("should match a fresh context when a long prompt shares a prefix", Label("integration"), func() {
+				expectLongPrefixReuse()
+			})
+
+			It("should match a fresh context when a long prompt shares a prefix with a full-size SWA cache", Label("integration"), func() {
+				Expect(ctx.Close()).To(Succeed())
+				var err error
+				ctx, err = model.NewContext(llama.WithContext(4096), llama.WithPrefixCaching(true), llama.WithSWAFull(true))
+				Expect(err).NotTo(HaveOccurred())
+
+				expectLongPrefixReuse()
+			})
+
+			It("should match a fresh context when the prompt shares a prefix", Label("integration"), func() {
+				_, err := ctx.Generate(first, llama.WithTemperature(0), llama.WithMaxTokens(20))
+				Expect(err).NotTo(HaveOccurred())
+
+				reused, err := ctx.Generate(second, llama.WithTemperature(0), llama.WithMaxTokens(20))
+				Expect(err).NotTo(HaveOccurred())
+				Expect(reused).To(Equal(generateFresh(second)))
+			})
+
+			It("should match a fresh context when the prompt repeats exactly", Label("integration"), func() {
+				_, err := ctx.Generate(first, llama.WithTemperature(0), llama.WithMaxTokens(20))
+				Expect(err).NotTo(HaveOccurred())
+
+				reused, err := ctx.Generate(first, llama.WithTemperature(0), llama.WithMaxTokens(20))
+				Expect(err).NotTo(HaveOccurred())
+				Expect(reused).To(Equal(generateFresh(first)))
+			})
 		})
 	})
 

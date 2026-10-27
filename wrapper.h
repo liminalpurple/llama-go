@@ -32,6 +32,7 @@ typedef struct {
     bool mlock;            // Memory lock
     bool mmap;             // Memory mapping
     bool embeddings;       // Enable embeddings
+    bool swa_full;         // Keep the whole context in sliding-window layers' cache
     const char* main_gpu;   // Main GPU
     const char* tensor_split; // Tensor split
     const char* kv_cache_type; // KV cache quantization: "f16", "q8_0", "q4_0"

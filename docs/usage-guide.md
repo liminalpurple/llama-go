@@ -245,7 +245,7 @@ Options use the functional options pattern, separated into ModelOption and Conte
 
 **Context options** (affect execution): `WithContext`, `WithBatch`, `WithUBatch`, `WithThreads`,
 `WithThreadsBatch`, `WithF16Memory`, `WithEmbeddings`, `WithKVCacheType`, `WithFlashAttn`,
-`WithParallel`, `WithPrefixCaching`
+`WithParallel`, `WithPrefixCaching`, `WithSWAFull`
 
 **RoPE options** (extend context beyond the training length): `WithRopeScaling`,
 `WithRopeFreqBase`, `WithRopeFreqScale`, `WithYarnExtFactor`, `WithYarnAttnFactor`,
@@ -500,7 +500,7 @@ Cache common prompt prefixes to avoid recomputing system prompts across thousand
 ```go
 ctx, _ := model.NewContext(
     llama.WithContext(8192),
-    llama.WithPrefixCaching(), // Enable KV cache prefix reuse
+    llama.WithPrefixCaching(true), // Enable KV cache prefix reuse (the default)
 )
 defer ctx.Close()
 
@@ -519,6 +519,14 @@ ctx.Chat(context.Background(), []llama.ChatMessage{
     {Role: "user", Content: "How do I write a file?"},
 })
 ```
+
+Recurrent and hybrid models (Mamba, Qwen3.5, Nemotron-H) can't trim their memory to an arbitrary
+point, and nor can sliding-window models (Gemma 2/3/4) with their default window-sized cache. For
+these, the context saves a checkpoint at the end of each prompt, and reuse resumes from it only when
+the next prompt continues the previous one, as in a conversation. A prompt that diverges earlier,
+like the second message above, is processed again from the start. For sliding-window models,
+`WithSWAFull(true)` keeps the whole context in those layers' cache so any shared prefix can be
+reused, at the cost of considerably more memory at long context sizes.
 
 ### Custom sampling parameters
 

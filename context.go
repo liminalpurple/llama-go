@@ -656,6 +656,7 @@ func (c *Context) generateWithConfig(prompt string, config generateConfig, callb
 		debug:                       C.bool(config.debug),
 		chat_session:                config.chatSession.cPtr(),
 		reasoning_budget:            C.int(config.reasoningBudget),
+		enable_prefix_caching:       C.bool(c.config.prefixCaching),
 	}
 
 	// Call C generation function
@@ -770,6 +771,7 @@ func (c *Context) generateWithTokensAndConfig(tokens []int32, config generateCon
 		debug:                       C.bool(config.debug),
 		chat_session:                config.chatSession.cPtr(),
 		reasoning_budget:            C.int(config.reasoningBudget),
+		enable_prefix_caching:       C.bool(c.config.prefixCaching),
 	}
 
 	// Call C generation function with tokens

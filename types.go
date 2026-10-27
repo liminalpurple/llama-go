@@ -15,6 +15,7 @@ type contextConfig struct {
 	f16Memory     bool
 	embeddings    bool
 	prefixCaching bool   // Enable KV cache prefix reuse (default: true)
+	swaFull       bool   // Full-size cache for sliding-window layers (default: false)
 	kvCacheType   string // KV cache quantization type: "f16", "q8_0", "q4_0" (default: "q8_0")
 	flashAttn     string // Flash Attention mode: "auto", "enabled", "disabled" (default: "auto")
 
