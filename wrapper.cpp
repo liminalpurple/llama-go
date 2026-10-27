@@ -58,6 +58,19 @@ static void apply_chat_session_sampling(common_params_sampling & sampling, const
     sampling.reasoning_budget_forced = sampling.reasoning_budget_end.front();
 }
 
+// Decode a batch in n_batch chunks, returning llama_process's result
+static int32_t decode_batch(llama_context * ctx, common_batch & batch) {
+    const int32_t n_batch = (int32_t)llama_n_batch(ctx);
+    for (int32_t off = 0; off < batch.size(); off += n_batch) {
+        const int32_t n = std::min(n_batch, batch.size() - off);
+        const int32_t ret = llama_process(ctx, LLAMA_PROCESS_TYPE_DECODE, batch.get_sub_batch(off, n));
+        if (ret != 0) {
+            return ret;
+        }
+    }
+    return 0;
+}
+
 // Batch helpers for llama_batch. b11521 removed common_batch_clear/common_batch_add
 // in favour of the llama_batch_ext-based common_batch; these keep the old behaviour.
 static void batch_clear(struct llama_batch & batch) {
@@ -510,23 +523,13 @@ char* llama_wrapper_generate_with_tokens(void* ctx, const int* tokens, int n_tok
         }
         int n_predict = params.max_tokens > 0 ? params.max_tokens : 128;
 
-        // Decode the prompt in n_batch chunks with explicit positions
-        const int n_batch = llama_n_batch(wrapper->ctx);
+        // Decode prompt tokens [from, to) with explicit positions
         auto decode_prompt = [&](int from, int to, bool logits_last) {
-            for (int start = from; start < to; start += n_batch) {
-                const int size = std::min(n_batch, to - start);
-                llama_batch batch = llama_batch_init(size, 0, 1);
-                batch_clear(batch);
-                for (int pos = start; pos < start + size; pos++) {
-                    batch_add(batch, prompt_tokens[pos], pos, { 0 }, logits_last && pos == to - 1);
-                }
-                const int ret = llama_decode(wrapper->ctx, batch);
-                llama_batch_free(batch);
-                if (ret != 0) {
-                    return false;
-                }
+            common_batch batch(wrapper->ctx);
+            for (int pos = from; pos < to; pos++) {
+                batch.add(prompt_tokens[pos], pos, 0, logits_last && pos == to - 1);
             }
-            return true;
+            return decode_batch(wrapper->ctx, batch) == 0;
         };
 
         // Decode up to the last prompt token, checkpoint there if this memory
@@ -622,35 +625,31 @@ char* llama_wrapper_generate_with_tokens(void* ctx, const int* tokens, int n_tok
             }
 
             // Decode the sampled token to get logits for next iteration
-            // Allocate enough space for the batch (minimum 512 tokens as per llama.cpp examples)
-            llama_batch gen_batch = llama_batch_init(512, 0, 1);
-            batch_clear(gen_batch);
-            batch_add(gen_batch, new_token_id, n_past, { 0 }, true);
+            common_batch gen_batch(wrapper->ctx);
+            gen_batch.add(new_token_id, n_past, 0, true);
 
             if (params.debug && n_gen == 0) {
-                fprintf(stderr, "DEBUG: Batch token=%d, pos=%d, n_tokens=%d\n", new_token_id, n_past, gen_batch.n_tokens);
+                fprintf(stderr, "DEBUG: Batch token=%d, pos=%d, n_tokens=%d\n", new_token_id, n_past, gen_batch.size());
             }
 
             // Increment position for next iteration
             n_past++;
 
             if (params.debug && n_gen == 0) {
-                fprintf(stderr, "DEBUG: Batch prepared, calling llama_decode\n");
+                fprintf(stderr, "DEBUG: Batch prepared, calling llama_process\n");
             }
 
-            if (llama_decode(wrapper->ctx, gen_batch) != 0) {
+            if (llama_process(wrapper->ctx, LLAMA_PROCESS_TYPE_DECODE, gen_batch.get()) != 0) {
                 if (params.debug) {
                     fprintf(stderr, "WARNING: decode failed, stopping generation\n");
                 }
-                llama_batch_free(gen_batch);
                 break;
             }
 
             if (params.debug && n_gen == 0) {
-                fprintf(stderr, "DEBUG: Decode succeeded, freeing batch\n");
+                fprintf(stderr, "DEBUG: Decode succeeded\n");
             }
 
-            llama_batch_free(gen_batch);
             n_decode += 1;
 
             if (params.debug && n_gen == 0) {
@@ -1236,28 +1235,14 @@ int llama_wrapper_embeddings(void* ctx, const char* text, float* embeddings, int
             return -1;
         }
 
-        // Evaluate tokens in chunks that respect n_batch limit
-        int n_batch = llama_n_batch(wrapper->ctx);
-        int n_tokens = tokens.size();
-
-        for (int i = 0; i < n_tokens; i += n_batch) {
-            int chunk_size = std::min(n_batch, n_tokens - i);
-            llama_batch batch = llama_batch_init(chunk_size, 0, 1);
-            batch_clear(batch);
-
-            // Add tokens for this chunk
-            for (int j = 0; j < chunk_size; j++) {
-                // All tokens need logits for embeddings
-                batch_add(batch, tokens[i + j], i + j, { 0 }, true);
-            }
-
-            if (llama_decode(wrapper->ctx, batch) != 0) {
-                llama_batch_free(batch);
-                g_last_error = "Failed to decode tokens for embeddings";
-                return -1;
-            }
-
-            llama_batch_free(batch);
+        // Evaluate tokens; all of them need output for embeddings
+        common_batch batch(wrapper->ctx);
+        for (size_t i = 0; i < tokens.size(); i++) {
+            batch.add(tokens[i], (llama_pos)i, 0, true);
+        }
+        if (decode_batch(wrapper->ctx, batch) != 0) {
+            g_last_error = "Failed to decode tokens for embeddings";
+            return -1;
         }
 
         // Get embeddings from sequence 0 (works for both single and multi-sequence contexts)
@@ -1313,8 +1298,7 @@ int llama_wrapper_embeddings_batch(void* ctx, const char** texts, int n_texts, f
         int n_batch = llama_n_batch(wrapper->ctx);
         int n_seq_max = llama_n_seq_max(wrapper->ctx);
 
-        // Initialize batch
-        llama_batch batch = llama_batch_init(n_batch, 0, n_seq_max);
+        common_batch batch(wrapper->ctx);
 
         int embeddings_stored = 0;  // Track how many embeddings we've extracted
 
@@ -1325,10 +1309,9 @@ int llama_wrapper_embeddings_batch(void* ctx, const char** texts, int n_texts, f
             int n_tokens = tokens.size();
 
             // Check if adding this text would exceed batch size or sequence limit
-            if (batch.n_tokens + n_tokens > n_batch || s >= n_seq_max) {
+            if (batch.size() + n_tokens > n_batch || s >= n_seq_max) {
                 // Decode current batch
-                if (llama_decode(wrapper->ctx, batch) != 0) {
-                    llama_batch_free(batch);
+                if (llama_process(wrapper->ctx, LLAMA_PROCESS_TYPE_DECODE, batch.get()) != 0) {
                     g_last_error = "Failed to decode batch";
                     return -1;
                 }
@@ -1337,7 +1320,6 @@ int llama_wrapper_embeddings_batch(void* ctx, const char** texts, int n_texts, f
                 for (int seq = 0; seq < s; seq++) {
                     const float* embd = llama_get_embeddings_seq(wrapper->ctx, seq);
                     if (!embd) {
-                        llama_batch_free(batch);
                         g_last_error = "Failed to get embeddings for sequence " + std::to_string(seq);
                         return -1;
                     }
@@ -1353,14 +1335,14 @@ int llama_wrapper_embeddings_batch(void* ctx, const char** texts, int n_texts, f
 
                 // Reset for next batch
                 s = 0;
-                batch_clear(batch);
+                batch.clear();
             }
 
             // Add tokens for this text with unique seq_id
             for (int j = 0; j < n_tokens; j++) {
                 // Position is relative to this sequence (starts at 0)
                 // All tokens need logits for embeddings
-                batch_add(batch, tokens[j], j, { s }, true);
+                batch.add(tokens[j], j, s, true);
             }
 
             s++;  // Move to next sequence ID
@@ -1368,8 +1350,7 @@ int llama_wrapper_embeddings_batch(void* ctx, const char** texts, int n_texts, f
 
         // Process final batch if there are remaining sequences
         if (s > 0) {
-            if (llama_decode(wrapper->ctx, batch) != 0) {
-                llama_batch_free(batch);
+            if (llama_process(wrapper->ctx, LLAMA_PROCESS_TYPE_DECODE, batch.get()) != 0) {
                 g_last_error = "Failed to decode final batch";
                 return -1;
             }
@@ -1378,7 +1359,6 @@ int llama_wrapper_embeddings_batch(void* ctx, const char** texts, int n_texts, f
             for (int seq = 0; seq < s; seq++) {
                 const float* embd = llama_get_embeddings_seq(wrapper->ctx, seq);
                 if (!embd) {
-                    llama_batch_free(batch);
                     g_last_error = "Failed to get embeddings for final sequence " + std::to_string(seq);
                     return -1;
                 }
@@ -1386,8 +1366,6 @@ int llama_wrapper_embeddings_batch(void* ctx, const char** texts, int n_texts, f
                 embeddings_stored++;
             }
         }
-
-        llama_batch_free(batch);
 
         // Verify we got all embeddings
         if (embeddings_stored != n_texts) {
