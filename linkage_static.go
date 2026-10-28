@@ -21,9 +21,9 @@
 package llama
 
 /*
-#cgo CFLAGS: -I./ -I./llama.cpp -I./llama.cpp/include -I./llama.cpp/ggml/include -I./llama.cpp/common -I./llama.cpp/vendor -I./cgo_headers -I./cgo_headers/llama.cpp -I./cgo_headers/llama.cpp/include -I./cgo_headers/llama.cpp/ggml/include -I./cgo_headers/llama.cpp/common -I./cgo_headers/llama.cpp/thirdparty
-#cgo CXXFLAGS: -std=c++17 -I./ -I./llama.cpp -I./llama.cpp/include -I./llama.cpp/ggml/include -I./llama.cpp/common -I./llama.cpp/vendor -I./cgo_headers -I./cgo_headers/llama.cpp -I./cgo_headers/llama.cpp/include -I./cgo_headers/llama.cpp/ggml/include -I./cgo_headers/llama.cpp/common -I./cgo_headers/llama.cpp/thirdparty
-#cgo !darwin LDFLAGS: -L./ -Wl,--start-group -lbinding -lmtmd -lvendor-hash -lllama-common -lllama-common-base -lllama -lggml-cpu -lggml -lggml-base -Wl,--end-group -lstdc++ -lm -lgomp
-#cgo darwin LDFLAGS: -L./ -lbinding -lmtmd -lvendor-hash -lllama-common -lllama-common-base -lllama -lggml-cpu -lggml -lggml-base -lggml-metal -lggml-blas -lstdc++ -lm -framework Accelerate -framework Foundation -framework Metal -framework MetalKit -framework MetalPerformanceShaders
+#cgo CFLAGS: -I./ -I./llama.cpp -I./llama.cpp/include -I./llama.cpp/ggml/include -I./llama.cpp/common -I./llama.cpp/tools/mtmd -I./llama.cpp/vendor -I./cgo_headers -I./cgo_headers/llama.cpp -I./cgo_headers/llama.cpp/include -I./cgo_headers/llama.cpp/ggml/include -I./cgo_headers/llama.cpp/common -I./cgo_headers/llama.cpp/tools/mtmd -I./cgo_headers/llama.cpp/thirdparty
+#cgo CXXFLAGS: -std=c++17 -I./ -I./llama.cpp -I./llama.cpp/include -I./llama.cpp/ggml/include -I./llama.cpp/common -I./llama.cpp/tools/mtmd -I./llama.cpp/vendor -I./cgo_headers -I./cgo_headers/llama.cpp -I./cgo_headers/llama.cpp/include -I./cgo_headers/llama.cpp/ggml/include -I./cgo_headers/llama.cpp/common -I./cgo_headers/llama.cpp/tools/mtmd -I./cgo_headers/llama.cpp/thirdparty
+#cgo !darwin LDFLAGS: -L./ -Wl,--start-group -lbinding -lserver-context -lmtmd -lvendor-hash -lllama-common -lllama-common-base -lcpp-httplib -lllama -lggml-cpu -lggml -lggml-base -Wl,--end-group -lstdc++ -lm -lgomp
+#cgo darwin LDFLAGS: -L./ -lbinding -lserver-context -lmtmd -lvendor-hash -lllama-common -lllama-common-base -lcpp-httplib -lllama -lggml-cpu -lggml -lggml-base -lggml-metal -lggml-blas -lstdc++ -lm -framework Accelerate -framework Foundation -framework Metal -framework MetalKit -framework MetalPerformanceShaders
 */
 import "C"

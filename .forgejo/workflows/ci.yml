@@ -160,6 +160,8 @@ jobs:
             libggml-cuda.a
             libmtmd.a
             libvendor-hash.a
+            libserver-context.a
+            libcpp-httplib.a
             wrapper.h
           retention-days: 1
 
