@@ -504,8 +504,9 @@ func (m *Model) SupportsAudio() bool {
 }
 
 // MediaMarker returns the text that places a media item in a prompt for this
-// model, or "" without a multimodal projector. It's random for each loaded
-// model, as in llama.cpp's server, so text from users can't place media.
+// model, or "" without a multimodal projector. As in llama.cpp's server, it's
+// random for each process, so text from users can't place media, unless the
+// LLAMA_MEDIA_MARKER environment variable pins it.
 //
 // Example:
 //

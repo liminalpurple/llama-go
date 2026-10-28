@@ -155,9 +155,9 @@ response, _ := ctx.Chat(context.Background(), []llama.ChatMessage{
 ```
 
 Media goes at the start of its message, in order. To place it elsewhere, put the model's
-`MediaMarker()` in the content once per item. The marker is random for each loaded model, as in
-llama.cpp's server, so text from users can't place media. For raw prompts, use the marker with
-`WithMedia`:
+`MediaMarker()` in the content once per item. The marker is random for each process, as in
+llama.cpp's server, so text from users can't place media (`LLAMA_MEDIA_MARKER` pins it). For raw
+prompts, use the marker with `WithMedia`:
 
 ```go
 prompt := "Compare " + model.MediaMarker() + " with " + model.MediaMarker()
@@ -168,6 +168,41 @@ text, _ := ctx.Generate(prompt, llama.WithMedia(first, second))
 through media: a prompt that repeats an earlier image reuses it rather than encoding it again, as
 media items are recognised by a hash of their bytes. `WithImageMaxTokens` caps how many tokens an
 image becomes, trading detail for speed. Speculative decoding doesn't support media input yet.
+
+### Decision models
+
+Decision models answer typed questions with calibrated probabilities rather than generated text,
+as llama.cpp's `/v1/systemone` API does: pick one of several options, answer yes or no, or rate on
+a scale. They're fast and cheap to ask, which suits monitoring: is someone at the door in this
+frame, which team should handle this ticket, does this page mention a given topic.
+
+```go
+model, _ := llama.LoadModel("h2o-lightning-4b-Q8_0.gguf", llama.WithMMProj("mmproj-lightning-f16.gguf"))
+defer model.Close()
+
+ctx, _ := model.NewContext(llama.WithContext(40960))
+defer ctx.Close()
+
+resp, err := ctx.Decide(context.Background(), llama.DecisionRequest{
+    State: "Front door camera",
+    Questions: map[string]llama.DecisionQuestion{
+        "person": {Type: llama.DecisionNoul, Instructions: "Is someone at the door?"},
+        "who": {Type: llama.DecisionChoice, Instructions: "Who is it?",
+            Choices: map[string]any{"courier": "delivering a parcel", "visitor": "anyone else"}},
+        "risk": {Type: llama.DecisionScore, Instructions: "How concerning is this?",
+            Levels: []any{"normal", "unusual", "alarming"}},
+    },
+    Media: [][]byte{frameJPEG},
+})
+if resp.Answers["person"].Noul > 0.8 {
+    fmt.Println(resp.Answers["who"].Choice, resp.Answers["who"].Confidence)
+}
+```
+
+`Model.DecisionType()` names the model's decision type, or is empty for other models. Decisions
+run llama.cpp's own decision code, so every type it supports works here, reading images and audio
+where the type does. Questions about the same state decode it once, and asking about the same
+state again reuses it from the prefix cache.
 
 ### Embeddings
 

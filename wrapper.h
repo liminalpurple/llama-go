@@ -183,6 +183,15 @@ int llama_wrapper_model_n_embd_out(void* model);
 // Whether the model file holds a built-in MTP head
 bool llama_wrapper_model_has_mtp_head(void* model);
 
+// Decision models: the model's decision type ("<arch>.decision.type"), or NULL
+// if it isn't one
+const char* llama_wrapper_model_decision_type(void* model);
+// Answer typed decision questions, as llama-server's /v1/systemone: request is
+// its JSON body, the result its JSON response (free with
+// llama_wrapper_free_result), NULL on error
+char* llama_wrapper_decide(void* ctx, const char* request, const unsigned char* const* media, const size_t* media_sizes,
+                           int n_media, bool enable_prefix_caching);
+
 // Multimodal projector capabilities, false without a projector
 bool llama_wrapper_model_supports_vision(void* model);
 bool llama_wrapper_model_supports_audio(void* model);

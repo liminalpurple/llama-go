@@ -8,6 +8,7 @@
 #include "llama.cpp/common/chat.h"
 #include "llama.cpp/tools/mtmd/mtmd.h"
 #include "llama.cpp/tools/mtmd/mtmd-helper.h"
+#include "llama.cpp/tools/server/server-decision.h"
 // Use angle-bracket form so this resolves via -I paths in both modes:
 // dev (-I./llama.cpp/vendor → submodule) and consumer
 // (-I./cgo_headers/llama.cpp/thirdparty → vendored copy). The vendored copy
@@ -116,10 +117,13 @@ struct llama_wrapper_model_t {
     int n_gpu_layers;  // Number of GPU layers requested (for stats reporting)
     bool has_mtp_head = false;  // The file holds a built-in MTP head
     bool mtp_loaded = false;    // ...and it was loaded alongside the weights
-    // Multimodal projector, if loaded, and its media marker: random, as in the
-    // server, so text from users can't place media
+    // Multimodal projector, if loaded, and its media marker: llama-server's,
+    // random for each process, so text from users can't place media
     mtmd_context* mtmd = nullptr;
     std::string media_marker;
+    // Typed decisions, through llama-server's decision code
+    server_decision_context decision;
+    std::string decision_type;  // "<arch>.decision.type", empty if not a decision model
 };
 
 // Whether a model file holds MTP head tensors. A file can declare a head and
@@ -200,6 +204,18 @@ struct prompt_input {
         return it->second.get();
     }
 
+    // The first n entries, which must end on a chunk boundary
+    prompt_input head(size_t n) const {
+        prompt_input out;
+        out.tokens.assign(tokens.begin(), tokens.begin() + n);
+        for (const auto & [start, chunk] : media) {
+            if (start < n) {
+                out.media[start] = chunk;
+            }
+        }
+        return out;
+    }
+
     // Index i, moved back to the start of the media chunk it falls inside
     size_t boundary(size_t i) const {
         size_t start = 0;
@@ -248,6 +264,7 @@ struct llama_wrapper_context_t {
     llama_model* model;  // Reference to parent model
     prompt_input cached;  // Prompt currently held in memory for sequence 0
     mtmd_context* mtmd = nullptr;  // The model's multimodal projector, if loaded
+    const server_decision_context* decision = nullptr;  // The model's decision context
     // Recurrent, hybrid and sliding-window memory can't be trimmed to an
     // arbitrary position, so reuse restores a checkpoint saved before the last
     // prompt token instead
@@ -414,11 +431,25 @@ void* llama_wrapper_model_load(const char* model_path, llama_wrapper_model_param
         wrapper->has_mtp_head = llama_model_n_layer_nextn(model) > 0 && file_has_mtp_head(model_path);
         wrapper->mtp_loaded = params.load_mtp && wrapper->has_mtp_head;
 
+        try {
+            wrapper->decision.init(model);
+        } catch (const std::exception& e) {
+            llama_model_free(model);
+            delete wrapper;
+            g_last_error = "Unsupported decision model: " + std::string(e.what());
+            return nullptr;
+        }
+        if (wrapper->decision.type != COMMON_DECISION_TYPE_NONE) {
+            char arch[128] = {0};
+            char type[128] = {0};
+            llama_model_meta_val_str(model, "general.architecture", arch, sizeof(arch));
+            llama_model_meta_val_str(model, (std::string(arch) + ".decision.type").c_str(), type, sizeof(type));
+            wrapper->decision_type = type;
+        }
+
         if (params.mmproj && params.mmproj[0] != '\0') {
-            std::random_device rd;
-            char marker[64];
-            snprintf(marker, sizeof(marker), "<__media_%08x%08x__>", rd(), rd());
-            wrapper->media_marker = marker;
+            // the decision code places media with the server's marker too
+            wrapper->media_marker = get_media_marker();
 
             mtmd_context_params mparams = mtmd_context_params_default();
             mparams.use_gpu = params.n_gpu_layers != 0;
@@ -466,7 +497,8 @@ void llama_wrapper_model_free(void* model) {
 // positions as it goes, so it needs checkpoints too. A batch too small to
 // probe gets checkpoints, which fall back to a full clear on any memory type.
 // Embedding contexts never reuse memory.
-static llama_wrapper_context_t* create_context(llama_model* model, const llama_context_params& ctx_params) {
+static llama_wrapper_context_t* create_context(llama_model* model, const llama_context_params& ctx_params,
+                                               bool reuses_memory = false) {
     llama_context* ctx = llama_init_from_model(model, ctx_params);
     if (!ctx) {
         return nullptr;
@@ -476,10 +508,11 @@ static llama_wrapper_context_t* create_context(llama_model* model, const llama_c
     ctx_wrapper->ctx = ctx;
     ctx_wrapper->model = model;
 
-    if (!ctx_params.embeddings && llama_n_batch(ctx) < 2) {
+    const bool probe = !ctx_params.embeddings || reuses_memory;
+    if (probe && llama_n_batch(ctx) < 2) {
         ctx_wrapper->rm_type = COMMON_CONTEXT_SEQ_RM_TYPE_FULL;
         ctx_wrapper->needs_checkpoint = true;
-    } else if (!ctx_params.embeddings) {
+    } else if (probe) {
         ctx_wrapper->rm_type = common_context_can_seq_rm(ctx);
         ctx_wrapper->needs_checkpoint = ctx_wrapper->rm_type != COMMON_CONTEXT_SEQ_RM_TYPE_PART ||
                                         (llama_model_n_swa(model) > 0 && !ctx_params.swa_full);
@@ -529,12 +562,30 @@ void* llama_wrapper_context_create(void* model, llama_wrapper_model_params param
             ctx_params.n_rs_seq = n_draft;
         }
 
-        ctx_wrapper = create_context(model_wrapper->model, ctx_params);
+        // As in common, decision models that score from the embeddings output
+        // need it enabled, unpooled except where the GGUF pools class scores
+        const common_decision_type decision_type = model_wrapper->decision.type;
+        if (decision_type == COMMON_DECISION_TYPE_LAYA || decision_type == COMMON_DECISION_TYPE_KEV ||
+            decision_type == COMMON_DECISION_TYPE_CLEF || decision_type == COMMON_DECISION_TYPE_LFM2_D1_OMNI ||
+            decision_type == COMMON_DECISION_TYPE_VLLM_DECISION2 || decision_type == COMMON_DECISION_TYPE_MINICPM_OCR_JEV) {
+            ctx_params.embeddings = true;
+            ctx_params.pooling_type = decision_type == COMMON_DECISION_TYPE_MINICPM_OCR_JEV
+                ? LLAMA_POOLING_TYPE_UNSPECIFIED : LLAMA_POOLING_TYPE_NONE;
+            ctx_params.n_outputs_max = ctx_params.n_batch;
+            ctx_params.n_outputs_max_per_seq = 1;
+        }
+        // embeddings need the whole batch in one micro-batch
+        if (ctx_params.embeddings && ctx_params.n_batch > ctx_params.n_ubatch) {
+            ctx_params.n_batch = ctx_params.n_ubatch;
+        }
+
+        ctx_wrapper = create_context(model_wrapper->model, ctx_params, decision_type != COMMON_DECISION_TYPE_NONE);
         if (!ctx_wrapper) {
             g_last_error = "Failed to create context";
             return nullptr;
         }
         ctx_wrapper->mtmd = model_wrapper->mtmd;
+        ctx_wrapper->decision = &model_wrapper->decision;
 
         if (speculate) {
             ctx_wrapper->n_draft = std::min(n_draft, (int)llama_n_batch(ctx_wrapper->ctx) - 1);
@@ -704,6 +755,57 @@ static common_params_sampling make_sampling_params(const llama_wrapper_generate_
     return sampling_params;
 }
 
+// Decodes one batch of at most n_batch entries into a context
+using decode_fn = std::function<bool(common_batch &)>;
+
+// Decode prompt entries [from, to): text in n_batch chunks with explicit
+// positions through decode_text, media chunks through mtmd, which encodes them
+// and decodes their embeddings. Sets g_last_error on failure.
+static bool decode_prompt_range(llama_wrapper_context_t * w, const prompt_input & prompt, int from, int to,
+                                bool output_last, const decode_fn & decode_text) {
+    const int n_batch = (int)llama_n_batch(w->ctx);
+    int i = from;
+    while (i < to) {
+        size_t start = 0;
+        if (const mtmd_input_chunk * chunk = prompt.chunk_at(i, start)) {
+            const int end = i + (int)mtmd_input_chunk_get_n_tokens(chunk);
+            // a model with non-causal attention on media needs the
+            // whole chunk in one micro-batch
+            if (mtmd_decode_use_non_causal(w->mtmd, chunk) &&
+                (int)mtmd_input_chunk_get_n_tokens(chunk) > (int)llama_n_ubatch(w->ctx)) {
+                g_last_error = "Media needs " + std::to_string(mtmd_input_chunk_get_n_tokens(chunk)) +
+                               " tokens in one micro-batch, more than the context's " +
+                               std::to_string(llama_n_ubatch(w->ctx)) + "; increase WithUBatch";
+                return false;
+            }
+            llama_pos new_pos = 0;
+            if (mtmd_helper_eval_chunk_single(w->mtmd, w->ctx, chunk, prompt.pos_at(i), 0, n_batch,
+                                              output_last && end >= to, &new_pos) != 0) {
+                g_last_error = "Failed to decode media";
+                return false;
+            }
+            i = end;
+            continue;
+        }
+        auto next = prompt.media.lower_bound(i);
+        const int run_end = next == prompt.media.end() ? to : std::min(to, (int)next->first);
+        const llama_pos pos0 = prompt.pos_at(i);
+        for (int run = i; run < run_end; run += n_batch) {
+            const int end = std::min(run_end, run + n_batch);
+            common_batch batch(w->ctx);
+            for (int k = run; k < end; k++) {
+                batch.add(prompt.tokens[k], pos0 + (k - i), 0, output_last && k == to - 1);
+            }
+            if (!decode_text(batch)) {
+                g_last_error = "Failed to decode prompt";
+                return false;
+            }
+        }
+        i = run_end;
+    }
+    return true;
+}
+
 // Verify drafted tokens with synthetic acceptance, as the server does for
 // benchmarking: each drafted token is accepted at random with its rate
 // instead of by matching the target. With rates of 0 every drafted token is
@@ -733,21 +835,19 @@ static llama_tokens sample_and_accept_synth(common_sampler * smpl, llama_context
     return result;
 }
 
-// Decodes one batch of at most n_batch entries into a context
-using decode_fn = std::function<bool(common_batch &)>;
 
 // Restore a context's memory to resume a prompt after at most limit entries,
-// always leaving the last entry to decode so its logits are fresh, and never
-// resuming inside a media chunk. Memory that can't be trimmed resumes from the
-// checkpoint saved before the last prompt token, or from the start. Returns
-// the index decoding resumes from, or -1 with g_last_error set.
-static int restore_prompt(llama_wrapper_context_t * w, const prompt_input & prompt, int limit) {
+// leaving the last entry to decode so its logits are fresh unless keep_last
+// is false, and never resuming inside a media chunk. Memory that can't be
+// trimmed resumes from a checkpoint, or from the start. Returns the index
+// decoding resumes from, or -1 with g_last_error set.
+static int restore_prompt(llama_wrapper_context_t * w, const prompt_input & prompt, int limit, bool keep_last = true) {
     // Memory no longer matches the cached prompt until the new one is decoded
     w->cached.clear();
 
     const int n_tokens = (int)prompt.size();
     llama_memory_t mem = llama_get_memory(w->ctx);
-    int resume_from = (int)prompt.boundary(std::min(limit, n_tokens - 1));
+    int resume_from = (int)prompt.boundary(std::min(limit, keep_last ? n_tokens - 1 : n_tokens));
     if (w->needs_checkpoint) {
         const auto & ckpt = w->checkpoint;
         if (!ckpt.empty() && ckpt.n_tokens <= resume_from &&
@@ -900,51 +1000,8 @@ static char* generate_prompt(llama_wrapper_context_t* wrapper, const prompt_inpu
             return nullptr;
         }
 
-        // Decode prompt entries [from, to): text in n_batch chunks with
-        // explicit positions, media chunks through mtmd, which encodes them and
-        // decodes their embeddings
-        const int n_batch = (int)llama_n_batch(wrapper->ctx);
         auto decode_prompt = [&](int from, int to, bool output_last) {
-            int i = from;
-            while (i < to) {
-                size_t start = 0;
-                if (const mtmd_input_chunk * chunk = prompt.chunk_at(i, start)) {
-                    const int end = i + (int)mtmd_input_chunk_get_n_tokens(chunk);
-                    // a model with non-causal attention on media needs the
-                    // whole chunk in one micro-batch
-                    if (mtmd_decode_use_non_causal(wrapper->mtmd, chunk) &&
-                        (int)mtmd_input_chunk_get_n_tokens(chunk) > (int)llama_n_ubatch(wrapper->ctx)) {
-                        g_last_error = "Media needs " + std::to_string(mtmd_input_chunk_get_n_tokens(chunk)) +
-                                       " tokens in one micro-batch, more than the context's " +
-                                       std::to_string(llama_n_ubatch(wrapper->ctx)) + "; increase WithUBatch";
-                        return false;
-                    }
-                    llama_pos new_pos = 0;
-                    if (mtmd_helper_eval_chunk_single(wrapper->mtmd, wrapper->ctx, chunk, prompt.pos_at(i), 0, n_batch,
-                                                      output_last && end >= to, &new_pos) != 0) {
-                        g_last_error = "Failed to decode media";
-                        return false;
-                    }
-                    i = end;
-                    continue;
-                }
-                auto next = prompt.media.lower_bound(i);
-                const int run_end = next == prompt.media.end() ? to : std::min(to, (int)next->first);
-                const llama_pos pos0 = prompt.pos_at(i);
-                for (int run = i; run < run_end; run += n_batch) {
-                    const int end = std::min(run_end, run + n_batch);
-                    common_batch batch(wrapper->ctx);
-                    for (int k = run; k < end; k++) {
-                        batch.add(prompt_tokens[k], pos0 + (k - i), 0, output_last && k == to - 1);
-                    }
-                    if (!decode_both(batch)) {
-                        g_last_error = "Failed to decode prompt";
-                        return false;
-                    }
-                }
-                i = run_end;
-            }
-            return true;
+            return decode_prompt_range(wrapper, prompt, from, to, output_last, decode_both);
         };
 
         // Decode up to the last prompt token, checkpoint there if the memory
@@ -1237,6 +1294,327 @@ char* llama_wrapper_generate(void* ctx, llama_wrapper_generate_params params) {
         g_last_error = "Exception during generation: " + std::string(e.what());
         return nullptr;
     }
+}
+
+// Convert a decision task's prompt, with its media chunks, to a prompt input
+static prompt_input decision_prompt(const server_tokens & tokens) {
+    // get_tokens() is for text-only prompts, so read entry by entry, with
+    // LLAMA_TOKEN_NULL for each media token
+    prompt_input prompt;
+    prompt.tokens.resize(tokens.size());
+    for (size_t i = 0; i < tokens.size(); i++) {
+        prompt.tokens[i] = tokens[i];
+    }
+    // each media chunk starts at its first LLAMA_TOKEN_NULL entry
+    for (size_t i = 0; i < prompt.size();) {
+        if (prompt.tokens[i] != LLAMA_TOKEN_NULL) {
+            i++;
+            continue;
+        }
+        const mtmd::input_chunk_ptr & chunk = tokens.find_chunk(i);
+        prompt.media[i] = std::shared_ptr<mtmd_input_chunk>(mtmd_input_chunk_copy(chunk.get()), mtmd_input_chunk_free);
+        i += mtmd_input_chunk_get_n_tokens(chunk.get());
+    }
+    return prompt;
+}
+
+// Add a media chunk's encoder output to a batch as embeddings, at the
+// positions mtmd decodes it at, as the server's add_mtmd_chunk does
+static bool add_media_embd(llama_wrapper_context_t * w, const mtmd_input_chunk * chunk, llama_pos pos0, bool output,
+                           common_batch & batch) {
+    if (mtmd_encode_chunk(w->mtmd, chunk) != 0) {
+        return false;
+    }
+    const float * embd = mtmd_get_output_embd(w->mtmd);
+    const size_t n_embd = llama_model_n_embd_inp(w->model);
+    const auto * image = mtmd_input_chunk_get_tokens_image(chunk);
+    const bool is_mrope = mtmd_decode_use_mrope(w->mtmd);
+    for (size_t i = 0; i < mtmd_input_chunk_get_n_tokens(chunk); i++) {
+        const llama_pos p = pos0 + (llama_pos)i;
+        llama_pos pos[GGML_MROPE_SECTIONS] = { p, p, p, p };
+        if (is_mrope && image) {
+            const mtmd_decoder_pos rel = mtmd_image_tokens_get_decoder_pos(image, pos0, i);
+            pos[0] = rel.t;
+            pos[1] = rel.y;
+            pos[2] = rel.x;
+            pos[3] = rel.z;
+        }
+        batch.add_embd({ embd + i * n_embd, 1, n_embd }, pos, 0, output);
+    }
+    return true;
+}
+
+// Run one decision task as llama-server does: decode its prompt with every
+// output it reads in one batch, then read its scores as send_decision does.
+// Sets g_last_error on failure.
+static bool run_decision_task(llama_wrapper_context_t * w, const server_task & task, bool cache, std::vector<float> & scores) {
+    const auto & decision = task.decision;
+    const prompt_input prompt = decision_prompt(task.tokens);
+    const int n_tokens = (int)prompt.size();
+    if (n_tokens == 0) {
+        g_last_error = "Decision prompt is empty";
+        return false;
+    }
+    if (n_tokens >= (int)llama_n_ctx(w->ctx)) {
+        g_last_error = "Decision prompt needs " + std::to_string(n_tokens) + " tokens, more than the context's " +
+                       std::to_string(llama_n_ctx(w->ctx)) + "; increase WithContext";
+        return false;
+    }
+
+    // A model without memory or with non-causal attention reads the whole
+    // prompt in one batch, media and all, as in the server's mixed batches
+    const bool mixed = !llama_get_memory(w->ctx) || !llama_get_causal_attn(w->ctx);
+    const bool need_embd = task.need_embd();
+    const int read_from = mixed ? 0 : (decision.pos_first() >= 0 ? decision.pos_first() : n_tokens - 1);
+    const int n_batch = (int)llama_n_batch(w->ctx);
+    if (n_tokens - read_from > n_batch) {
+        g_last_error = "Decision needs " + std::to_string(n_tokens - read_from) + " tokens in one batch, more than the context's " +
+                       std::to_string(n_batch) + "; increase WithBatch";
+        return false;
+    }
+
+    // Reuse the cached prompt up to the outputs, which must be decoded
+    const int limit = cache && !mixed ? std::min((int)w->cached.common_prefix(prompt), read_from) : 0;
+    const int resume_from = restore_prompt(w, prompt, limit);
+    if (resume_from < 0) {
+        return false;
+    }
+    const decode_fn decode_tgt = [&](common_batch & batch) {
+        return decode_batch(w->ctx, batch) == 0;
+    };
+    if (!decode_prompt_range(w, prompt, resume_from, read_from, false, decode_tgt)) {
+        return false;
+    }
+
+    common_batch batch(w->ctx);
+    for (int i = read_from; i < n_tokens;) {
+        size_t start = 0;
+        if (const mtmd_input_chunk * chunk = prompt.chunk_at(i, start)) {
+            if (!mixed) {
+                g_last_error = "Decision outputs must follow any media in the prompt";
+                return false;
+            }
+            if (!add_media_embd(w, chunk, prompt.pos_at(i), need_embd, batch)) {
+                g_last_error = "Failed to encode media";
+                return false;
+            }
+            i += (int)mtmd_input_chunk_get_n_tokens(chunk);
+            continue;
+        }
+        const int idx = batch.add(prompt.tokens[i], prompt.pos_at(i), 0, need_embd || i == n_tokens - 1);
+        if (!decision.order.empty()) {
+            batch.tokens[idx].decision_order = decision.order[i];
+        }
+        i++;
+    }
+    if (llama_process(w->ctx, LLAMA_PROCESS_TYPE_DECODE, batch.get()) != 0) {
+        g_last_error = "Failed to decode decision prompt";
+        return false;
+    }
+
+    const int32_t n_embd_out = llama_model_n_embd_out(w->model);
+    if (decision.pooled) {
+        const float * embd = llama_get_embeddings_seq(w->ctx, 0);
+        if (!embd) {
+            g_last_error = "Failed to get the class scores";
+            return false;
+        }
+        scores.assign(embd, embd + n_embd_out);
+    } else if (!decision.labels.empty()) {
+        const float * logits = llama_get_logits_ith(w->ctx, -1);
+        if (!logits) {
+            g_last_error = "Failed to get logits";
+            return false;
+        }
+        for (const llama_token label : decision.labels) {
+            scores.push_back(logits[label]);
+        }
+        if (!decision.label_groups.empty()) {
+            std::vector<float> grouped;
+            size_t i = 0;
+            for (const int32_t n : decision.label_groups) {
+                grouped.push_back(*std::max_element(scores.begin() + i, scores.begin() + i + n));
+                i += n;
+            }
+            scores = std::move(grouped);
+        }
+    } else {
+        // every entry of the batch is an output, from prompt index read_from
+        auto get_embd = [&](int32_t pos) -> const float * {
+            const int32_t i = pos - read_from;
+            return i >= 0 && i < batch.size() ? llama_get_embeddings_ith(w->ctx, i) : nullptr;
+        };
+        // joint head: the scores are the first rows
+        for (int32_t i = 0; i < decision.n_scores; i++) {
+            const float * embd = i < batch.size() ? llama_get_embeddings_ith(w->ctx, i) : nullptr;
+            if (!embd) {
+                g_last_error = "Failed to get embeddings";
+                return false;
+            }
+            scores.push_back(embd[0]);
+        }
+        const int32_t n_pointer = n_embd_out / 2;
+        const float * embd_q = decision.pointer >= 0 ? get_embd(decision.pointer) : nullptr;
+        for (const int32_t marker : decision.markers) {
+            const float * embd = get_embd(marker);
+            if (!embd || (decision.pointer >= 0 && !embd_q)) {
+                g_last_error = "Failed to get embeddings, the question and its options must fit in one batch";
+                return false;
+            }
+            if (decision.pointer < 0) {
+                scores.push_back(embd[decision.column]);
+                continue;
+            }
+            float dot = 0.0f;
+            for (int32_t i = 0; i < n_pointer; i++) {
+                dot += embd_q[i] * embd[n_pointer + i];
+            }
+            scores.push_back(dot / sqrtf((float)n_pointer));
+        }
+    }
+
+    if (cache && !mixed) {
+        w->cached = prompt;
+    }
+    return true;
+}
+
+char* llama_wrapper_decide(void* ctx, const char* request, const unsigned char* const* media, const size_t* media_sizes,
+                           int n_media, bool enable_prefix_caching) {
+    if (!ctx || !request) {
+        g_last_error = "Context and request cannot be null";
+        return nullptr;
+    }
+    auto w = static_cast<llama_wrapper_context_t*>(ctx);
+    if (!w->ctx) {
+        g_last_error = "Context has been freed";
+        return nullptr;
+    }
+    if (!w->decision || w->decision->type == COMMON_DECISION_TYPE_NONE) {
+        g_last_error = "Model is not a decision model";
+        return nullptr;
+    }
+    if (w->spec) {
+        g_last_error = "Decisions don't support speculative decoding";
+        return nullptr;
+    }
+
+    try {
+        // As llama-server's /v1/systemone handler
+        const server_decision_context & decision = *w->decision;
+        const json body = json::parse(request);
+        const auto questions = decision.parse_questions(body);
+        std::vector<raw_buffer> files;
+        const json state = decision.prepare_state(decision.parse_state(body, files));
+        for (int i = 0; i < n_media; i++) {
+            files.emplace_back(media[i], media[i] + media_sizes[i]);
+        }
+        if (!files.empty() && !decision.can_use_images()) {
+            g_last_error = "This decision model doesn't read media";
+            return nullptr;
+        }
+        if (!files.empty() && !w->mtmd) {
+            g_last_error = "Media input needs the model loaded with a multimodal projector (WithMMProj)";
+            return nullptr;
+        }
+
+        // one task per variant of each question, or one task for all the questions
+        const mtmd_helper_init_opt init_opt = mtmd_helper_init_opt_default();
+        std::vector<server_task> tasks;
+        if (decision.is_joint()) {
+            server_task task(SERVER_TASK_TYPE_DECISION);
+            decision.fill_task_joint(state, questions, files, w->mtmd, init_opt, task);
+            tasks.push_back(std::move(task));
+        } else {
+            for (const auto & question : questions) {
+                for (size_t variant = 0; variant < decision.n_variants(question); variant++) {
+                    server_task task(SERVER_TASK_TYPE_DECISION);
+                    decision.fill_task(state, questions, question, variant, files, w->mtmd, init_opt, task);
+                    tasks.push_back(std::move(task));
+                }
+            }
+        }
+
+        // The tasks share the rendered state, which the server decodes once
+        // and copies to a sequence per task. Here the tasks run in turn, so
+        // decode the shared part once and keep it for each of them: memory
+        // that can be trimmed keeps it anyway, other memory gets a checkpoint
+        // at its end, which also serves the next request about the same state.
+        if (enable_prefix_caching && tasks.size() > 1 && llama_get_memory(w->ctx) && llama_get_causal_attn(w->ctx)) {
+            std::vector<prompt_input> prompts;
+            for (const auto & task : tasks) {
+                prompts.push_back(decision_prompt(task.tokens));
+            }
+            size_t shared = prompts[0].size();
+            for (size_t i = 0; i < prompts.size(); i++) {
+                shared = std::min(shared, prompts[0].common_prefix(prompts[i]));
+                const int32_t pos_first = tasks[i].decision.pos_first();
+                shared = std::min(shared, (size_t)(pos_first >= 0 ? pos_first : prompts[i].size() - 1));
+            }
+            shared = prompts[0].boundary(shared);
+            if (shared > 1) {
+                const prompt_input state = prompts[0].head(shared);
+                const int limit = std::min((int)w->cached.common_prefix(state), (int)shared);
+                const int resume_from = restore_prompt(w, state, limit, /*keep_last*/ false);
+                const decode_fn decode_tgt = [&](common_batch & batch) {
+                    return decode_batch(w->ctx, batch) == 0;
+                };
+                if (resume_from < 0 || !decode_prompt_range(w, state, resume_from, (int)shared, false, decode_tgt)) {
+                    return nullptr;
+                }
+                if (w->needs_checkpoint && (w->checkpoint.empty() || w->checkpoint.n_tokens != shared)) {
+                    llama_memory_t mem = llama_get_memory(w->ctx);
+                    w->checkpoint.update_pos(shared, llama_memory_seq_pos_min(mem, 0), llama_memory_seq_pos_max(mem, 0));
+                    w->checkpoint.update_tgt(w->ctx, 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+                }
+                w->cached = state;
+            }
+        }
+
+        std::vector<std::vector<float>> results(tasks.size());
+        int32_t n_tokens = 0;
+        for (size_t i = 0; i < tasks.size(); i++) {
+            if (!run_decision_task(w, tasks[i], enable_prefix_caching, results[i])) {
+                return nullptr;
+            }
+            n_tokens += tasks[i].n_tokens();
+        }
+
+        json answers = json::object();
+        size_t i_result = 0;
+        size_t i_score = 0;
+        for (const auto & question : questions) {
+            std::vector<std::vector<float>> scores;
+            if (decision.is_joint()) {
+                // one result with the scores of all the questions, in order
+                const auto & all = results[0];
+                if (i_score + question.options.size() > all.size()) {
+                    g_last_error = "Decision result has fewer scores than options";
+                    return nullptr;
+                }
+                scores.emplace_back(all.begin() + i_score, all.begin() + i_score + question.options.size());
+                i_score += question.options.size();
+            }
+            for (size_t variant = 0; !decision.is_joint() && variant < decision.n_variants(question); variant++) {
+                scores.push_back(results[i_result++]);
+            }
+            answers[question.id] = decision.format_answer(question, scores, !files.empty());
+        }
+
+        const json response = {
+            {"answers", answers},
+            {"usage", {{"input_tokens", n_tokens}, {"output_tokens", 0}}},
+        };
+        return strdup(response.dump().c_str());
+    } catch (const std::exception& e) {
+        g_last_error = "Decision failed: " + std::string(e.what());
+        return nullptr;
+    }
+}
+
+const char* llama_wrapper_model_decision_type(void* model) {
+    auto wrapper = static_cast<llama_wrapper_model_t*>(model);
+    return wrapper && !wrapper->decision_type.empty() ? wrapper->decision_type.c_str() : nullptr;
 }
 
 int llama_wrapper_tokenize(void* ctx, const char* text, int* tokens, int max_tokens) {

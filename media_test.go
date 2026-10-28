@@ -142,11 +142,9 @@ var _ = Describe("Media input", Label("media"), func() {
 			Expect(strings.ToLower(raw)).To(ContainSubstring("red"))
 		})
 
-		It("should give each loaded model its own marker", Label("integration"), func() {
-			other := loadWithMMProj("TEST_VISION_MODEL")
-			defer func() { Expect(other.Close()).To(Succeed()) }()
-			Expect(other.MediaMarker()).NotTo(BeEmpty())
-			Expect(other.MediaMarker()).NotTo(Equal(model.MediaMarker()))
+		It("should use a random marker rather than mtmd's fixed default", Label("integration"), func() {
+			Expect(model.MediaMarker()).NotTo(BeEmpty())
+			Expect(model.MediaMarker()).NotTo(Equal("<__media__>"))
 		})
 
 		It("should reject a marker count that doesn't match the media", Label("integration"), func() {
