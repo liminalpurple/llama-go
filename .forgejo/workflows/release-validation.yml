@@ -34,12 +34,16 @@ jobs:
       SCCACHE_GHA_ENABLED: "true"
       TEST_CHAT_MODEL: Qwen3-0.6B-Q8_0.gguf
       TEST_EMBEDDING_MODEL: Qwen3-Embedding-0.6B-Q8_0.gguf
-      # Qwen3.5 0.8B is recurrent and has a built-in MTP head
-      TEST_MTP_MODEL: Qwen3.5-0.8B-Q8_0.gguf
-      # A second chat model with sliding-window attention, and an MTP head
-      # in the sidecar file beside it
-      TEST_GEMMA_MODEL: gemma-4-E2B-it-Q4_K_M.gguf
-      TEST_MTP_SIDECAR_MODEL: gemma-4-E2B-it-Q4_K_M.gguf
+      # Models with their sidecar files (MTP heads, mmproj-*.gguf projectors)
+      # kept beside them, as llama.cpp expects. Qwen3.5 0.8B is recurrent,
+      # with a built-in MTP head and a vision projector.
+      TEST_MTP_MODEL: Qwen3.5-0.8B/Qwen3.5-0.8B-Q8_0.gguf
+      TEST_VISION_MODEL: Qwen3.5-0.8B/Qwen3.5-0.8B-Q8_0.gguf
+      # A second chat model with sliding-window attention, an MTP head in a
+      # sidecar file and a projector that reads audio
+      TEST_GEMMA_MODEL: gemma-4-E2B-it/gemma-4-E2B-it-Q4_K_M.gguf
+      TEST_MTP_SIDECAR_MODEL: gemma-4-E2B-it/gemma-4-E2B-it-Q4_K_M.gguf
+      TEST_AUDIO_MODEL: gemma-4-E2B-it/gemma-4-E2B-it-Q4_K_M.gguf
       LLAMA_LOG: error
     steps:
       - name: Checkout code
@@ -57,10 +61,9 @@ jobs:
           path: |
             Qwen3-0.6B-Q8_0.gguf
             Qwen3-Embedding-0.6B-Q8_0.gguf
-            Qwen3.5-0.8B-Q8_0.gguf
-            gemma-4-E2B-it-Q4_K_M.gguf
-            mtp-gemma-4-E2B-it-Q8_0.gguf
-          key: test-models-v2
+            Qwen3.5-0.8B
+            gemma-4-E2B-it
+          key: test-models-v3
 
       - name: Cache dependencies
         uses: https://github.com/actions/cache@v4
@@ -92,16 +95,19 @@ jobs:
           if [ ! -f Qwen3-Embedding-0.6B-Q8_0.gguf ]; then
             wget -q https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf
           fi
+          # fetch <folder> <repo> <file in repo>
+          fetch() {
+            mkdir -p "$1"
+            if [ ! -f "$1/$(basename "$3")" ]; then
+              wget -q -O "$1/$(basename "$3")" "https://huggingface.co/$2/resolve/main/$3"
+            fi
+          }
           # The MTP build keeps the head that unsloth/Qwen3.5-0.8B-GGUF strips
-          if [ ! -f Qwen3.5-0.8B-Q8_0.gguf ]; then
-            wget -q https://huggingface.co/unsloth/Qwen3.5-0.8B-MTP-GGUF/resolve/main/Qwen3.5-0.8B-Q8_0.gguf
-          fi
-          if [ ! -f gemma-4-E2B-it-Q4_K_M.gguf ]; then
-            wget -q https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf
-          fi
-          if [ ! -f mtp-gemma-4-E2B-it-Q8_0.gguf ]; then
-            wget -q https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/MTP/mtp-gemma-4-E2B-it-Q8_0.gguf
-          fi
+          fetch Qwen3.5-0.8B unsloth/Qwen3.5-0.8B-MTP-GGUF Qwen3.5-0.8B-Q8_0.gguf
+          fetch Qwen3.5-0.8B unsloth/Qwen3.5-0.8B-MTP-GGUF mmproj-F16.gguf
+          fetch gemma-4-E2B-it unsloth/gemma-4-E2B-it-GGUF gemma-4-E2B-it-Q4_K_M.gguf
+          fetch gemma-4-E2B-it unsloth/gemma-4-E2B-it-GGUF MTP/mtp-gemma-4-E2B-it-Q8_0.gguf
+          fetch gemma-4-E2B-it unsloth/gemma-4-E2B-it-GGUF mmproj-F16.gguf
 
       - name: Compute Go build tags
         id: tags
@@ -123,6 +129,8 @@ jobs:
           TEST_EMBEDDING_MODEL: ""
           TEST_MTP_MODEL: ""
           TEST_MTP_SIDECAR_MODEL: ""
+          TEST_VISION_MODEL: ""
+          TEST_AUDIO_MODEL: ""
         run: |
           TEST_CHAT_MODEL=$TEST_GEMMA_MODEL go run github.com/onsi/ginkgo/v2/ginkgo -tags '${{ steps.tags.outputs.tags }}' --flake-attempts 3 -v ./...
 
