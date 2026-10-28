@@ -472,6 +472,20 @@ func findCommonPrefix(a, b []int32) int {
 	return commonLen
 }
 
+// validate returns an error for generation options llama.cpp would ignore
+func (g generateConfig) validate() error {
+	// llama.cpp ignores breakers after the first LLAMA_DRY_MAX_SEQ_BREAKERS
+	// distinct ones, with only a log warning
+	distinct := make(map[string]struct{}, len(g.drySequenceBreakers))
+	for _, breaker := range g.drySequenceBreakers {
+		distinct[breaker] = struct{}{}
+	}
+	if limit := int(C.llama_wrapper_dry_max_seq_breakers()); len(distinct) > limit {
+		return fmt.Errorf("at most %d distinct DRY sequence breakers are supported, got %d", limit, len(distinct))
+	}
+	return nil
+}
+
 // checkModelsOpen returns an error if the model, or the draft model this
 // context speculates with, has been closed
 func (c *Context) checkModelsOpen() error {
@@ -505,6 +519,9 @@ func (c *Context) generateWithConfig(prompt string, config generateConfig, callb
 	}
 
 	if err := c.checkModelsOpen(); err != nil {
+		return "", err
+	}
+	if err := config.validate(); err != nil {
 		return "", err
 	}
 
@@ -618,6 +635,9 @@ func (c *Context) generateWithTokensAndConfig(tokens []int32, config generateCon
 	}
 
 	if err := c.checkModelsOpen(); err != nil {
+		return "", err
+	}
+	if err := config.validate(); err != nil {
 		return "", err
 	}
 

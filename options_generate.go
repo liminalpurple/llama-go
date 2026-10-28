@@ -417,7 +417,8 @@ func WithDRYPenaltyLastN(n int) GenerateOption {
 // When these sequences appear, DRY stops considering earlier tokens as part
 // of a repeated pattern. Default breakers (newline, colon, quote, asterisk)
 // work well for natural text structure. Only affects behaviour when DRY
-// multiplier is enabled.
+// multiplier is enabled. Generation returns an error for more than 64
+// distinct breakers, as llama.cpp would ignore the rest.
 //
 // Default: []string{"\n", ":", "\"", "*"}
 //

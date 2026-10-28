@@ -1,6 +1,7 @@
 package llama_test
 
 import (
+	"fmt"
 	"os"
 	"strings"
 
@@ -244,6 +245,32 @@ var _ = Describe("Model.Generate", func() {
 
 			// Confident models such as Gemma 4 need a strong penalty to flip a token
 			Expect(generate(3.0)).NotTo(Equal(generate(1.0)))
+		})
+
+		It("should generate with DRY sampling", Label("integration"), func() {
+			response, err := ctx.Generate("Hello world",
+				llama.WithMaxTokens(20),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
+				llama.WithDRYMultiplier(0.8),
+				llama.WithDRYSequenceBreakers("\n", ";"),
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(response).NotTo(BeEmpty())
+		})
+
+		It("should reject more DRY sequence breakers than llama.cpp supports", Label("integration"), func() {
+			breakers := make([]string, 65)
+			for i := range breakers {
+				breakers[i] = fmt.Sprintf("<%d>", i)
+			}
+			_, err := ctx.Generate("Hello world", llama.WithMaxTokens(5), llama.WithDRYMultiplier(0.8),
+				llama.WithDRYSequenceBreakers(breakers...))
+			Expect(err).To(MatchError("at most 64 distinct DRY sequence breakers are supported, got 65"))
+
+			// Duplicates don't count towards the limit, as in llama.cpp
+			_, err = ctx.Generate("Hello world", llama.WithMaxTokens(5), llama.WithDRYMultiplier(0.8),
+				llama.WithDRYSequenceBreakers(append(breakers[:64], breakers[0])...))
+			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 

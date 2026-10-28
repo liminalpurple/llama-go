@@ -498,6 +498,10 @@ int llama_wrapper_model_n_embd_out(void* model) {
     return llama_model_n_embd_out(model_wrapper->model);
 }
 
+int llama_wrapper_dry_max_seq_breakers(void) {
+    return LLAMA_DRY_MAX_SEQ_BREAKERS;
+}
+
 bool llama_wrapper_model_has_mtp_head(void* model) {
     return model && static_cast<llama_wrapper_model_t*>(model)->has_mtp_head;
 }

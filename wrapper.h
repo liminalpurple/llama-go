@@ -159,6 +159,7 @@ int llama_wrapper_embeddings_batch(void* ctx, const char** texts, int n_texts, f
 
 // Utility functions
 void llama_wrapper_free_result(char* result);
+int llama_wrapper_dry_max_seq_breakers(void);  // LLAMA_DRY_MAX_SEQ_BREAKERS
 const char* llama_wrapper_last_error();
 int llama_wrapper_get_cached_token_count(void* ctx);
 
