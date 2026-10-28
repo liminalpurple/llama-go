@@ -58,6 +58,7 @@ var _ = Describe("Context.GenerateStream", func() {
 				callback,
 				llama.WithMaxTokens(10),
 				llama.WithTemperature(0.7),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(callCount).To(BeNumerically(">", 0))
@@ -73,6 +74,7 @@ var _ = Describe("Context.GenerateStream", func() {
 			err := ctx.GenerateStream("Hello",
 				callback,
 				llama.WithMaxTokens(5),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(tokens).NotTo(BeEmpty())
@@ -92,6 +94,7 @@ var _ = Describe("Context.GenerateStream", func() {
 			err := ctx.GenerateStream("The sky is",
 				callback,
 				llama.WithMaxTokens(20),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(accumulated).NotTo(BeEmpty())
@@ -108,6 +111,7 @@ var _ = Describe("Context.GenerateStream", func() {
 				callback,
 				llama.WithMaxTokens(10),
 				llama.WithSeed(42),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(streamResult).NotTo(BeEmpty())
@@ -130,6 +134,7 @@ var _ = Describe("Context.GenerateStream", func() {
 			err := ctx.GenerateStream("Test",
 				callback,
 				llama.WithMaxTokens(5),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(threadID).To(Equal("set"))
@@ -147,6 +152,7 @@ var _ = Describe("Context.GenerateStream", func() {
 			err := ctx.GenerateStream("Tell me a story",
 				callback,
 				llama.WithMaxTokens(100),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(tokenCount).To(Equal(1), "should stop after first token")
@@ -174,6 +180,7 @@ var _ = Describe("Context.GenerateStream", func() {
 			err := ctx.GenerateStream("Hello",
 				callback,
 				llama.WithMaxTokens(50),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(output).NotTo(BeEmpty(), "should have at least one token before stopping")
@@ -206,6 +213,7 @@ var _ = Describe("Context.GenerateStream", func() {
 			err := ctx.GenerateStream("Write a long story",
 				callback,
 				llama.WithMaxTokens(1000),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(count).To(Equal(1))
@@ -246,6 +254,7 @@ var _ = Describe("Context.GenerateStream", func() {
 			err := ctx.GenerateStream("Tell me a long story about dragons",
 				callback,
 				llama.WithMaxTokens(100),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(count).To(Equal(stopAfter))
@@ -261,6 +270,7 @@ var _ = Describe("Context.GenerateStream", func() {
 			err := ctx.GenerateStream("Count to ten",
 				callback,
 				llama.WithMaxTokens(50),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(len(tokens)).To(Equal(3))
@@ -277,6 +287,7 @@ var _ = Describe("Context.GenerateStream", func() {
 			err := ctx.GenerateStream("Generate text",
 				callback,
 				llama.WithMaxTokens(100),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(count).To(Equal(stopAt), "should not call callback after it returns false")
@@ -310,6 +321,7 @@ var _ = Describe("Context.GenerateStream", func() {
 			err := ctx.GenerateStream("Hello world.",
 				callback,
 				llama.WithMaxTokens(50),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 				llama.WithStopWords("world"),
 			)
 			Expect(err).NotTo(HaveOccurred())
@@ -359,6 +371,7 @@ var _ = Describe("Context.GenerateStream", func() {
 			err := ctx.GenerateStream("This is a test sentence.",
 				callback,
 				llama.WithMaxTokens(50),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 				llama.WithStopWords("."),
 			)
 			Expect(err).NotTo(HaveOccurred())
@@ -471,6 +484,7 @@ var _ = Describe("Context.GenerateStream", func() {
 				llama.WithMaxTokens(10),
 				llama.WithTemperature(0.0), // Very deterministic
 				llama.WithSeed(42),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -479,6 +493,7 @@ var _ = Describe("Context.GenerateStream", func() {
 				llama.WithMaxTokens(10),
 				llama.WithTemperature(2.0), // Very random
 				llama.WithSeed(43),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -534,6 +549,7 @@ var _ = Describe("Streaming Callback Behaviour", func() {
 			err := ctx.GenerateStream("Count: one two three",
 				callback,
 				llama.WithMaxTokens(15),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(tokens).NotTo(BeEmpty())
@@ -550,6 +566,7 @@ var _ = Describe("Streaming Callback Behaviour", func() {
 			err := ctx.GenerateStream("Internationalization",
 				callback,
 				llama.WithMaxTokens(10),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			// Tokens may be partial words due to BPE/subword tokenisation
@@ -568,6 +585,7 @@ var _ = Describe("Streaming Callback Behaviour", func() {
 			err := ctx.GenerateStream("Generate some text",
 				callback,
 				llama.WithMaxTokens(10),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(tokenCounter).To(BeNumerically(">", 0))
@@ -585,6 +603,7 @@ var _ = Describe("Streaming Callback Behaviour", func() {
 			err := ctx.GenerateStream("Write a paragraph",
 				callback,
 				llama.WithMaxTokens(100),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(len(accumulated)).To(BeNumerically(">=", 50))
@@ -604,6 +623,7 @@ var _ = Describe("Streaming Callback Behaviour", func() {
 			err := ctx.GenerateStream("The quick brown fox",
 				callback,
 				llama.WithMaxTokens(100),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(len(output)).To(BeNumerically(">=", targetLength))
@@ -621,6 +641,7 @@ var _ = Describe("Streaming Callback Behaviour", func() {
 			err := ctx.GenerateStream("Write a long story about adventures",
 				callback,
 				llama.WithMaxTokens(100),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			// Verify that generation stopped around the target length
@@ -639,6 +660,7 @@ var _ = Describe("Streaming Callback Behaviour", func() {
 			err := ctx.GenerateStream("Count tokens",
 				callback,
 				llama.WithMaxTokens(100),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(count).To(Equal(maxCount))

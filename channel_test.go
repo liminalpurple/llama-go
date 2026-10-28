@@ -61,7 +61,7 @@ var _ = Describe("Model.GenerateChannel", func() {
 		It("should stream tokens via channel", Label("integration", "channel"), func() {
 			bgCtx := context.Background()
 			tokenCh, errCh := ctx.GenerateChannel(bgCtx, "Hello",
-				llama.WithMaxTokens(10))
+				llama.WithMaxTokens(10), llama.WithIgnoreEOS(true))
 
 			var result strings.Builder
 			var err error
@@ -87,6 +87,7 @@ var _ = Describe("Model.GenerateChannel", func() {
 			bgCtx := context.Background()
 			tokenCh, errCh := ctx.GenerateChannel(bgCtx, "The capital of France is",
 				llama.WithMaxTokens(20),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 				llama.WithSeed(42))
 
 			var tokens []string
@@ -113,7 +114,7 @@ var _ = Describe("Model.GenerateChannel", func() {
 		It("should receive non-empty token strings", Label("integration", "channel"), func() {
 			bgCtx := context.Background()
 			tokenCh, errCh := ctx.GenerateChannel(bgCtx, "Test",
-				llama.WithMaxTokens(10))
+				llama.WithMaxTokens(10), llama.WithIgnoreEOS(true))
 
 			var err error
 			tokenCount := 0
@@ -142,7 +143,9 @@ var _ = Describe("Model.GenerateChannel", func() {
 			bgCtx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			tokenCh, errCh := ctx.GenerateChannel(bgCtx, "Write a very long story about dragons and knights",
-				llama.WithMaxTokens(1000))
+				llama.WithMaxTokens(1000),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
+			)
 
 			tokenCount := 0
 			cancelAfter := 5
@@ -254,7 +257,9 @@ var _ = Describe("Model.GenerateChannel", func() {
 			defer cancel()
 
 			tokenCh, errCh := ctx.GenerateChannel(ctxTimeout, "Write a detailed story about dragons",
-				llama.WithMaxTokens(2000)) // Fits the 2048 context
+				llama.WithMaxTokens(2000), // Fits the 2048 context
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
+			)
 
 			var tokens []string
 
@@ -476,6 +481,7 @@ var _ = Describe("Model.GenerateChannel", func() {
 			bgCtx := context.Background()
 			tokenCh, errCh := ctx.GenerateChannel(bgCtx, "The sky is blue.",
 				llama.WithMaxTokens(50),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 				llama.WithStopWords("."))
 
 			var result strings.Builder
@@ -529,6 +535,7 @@ var _ = Describe("Model.GenerateChannel", func() {
 			bgCtx := context.Background()
 			tokenCh, errCh := ctx.GenerateChannel(bgCtx, "Hello world",
 				llama.WithMaxTokens(50),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 				llama.WithStopWords(".", "!", "?"))
 
 			var result strings.Builder
@@ -583,6 +590,7 @@ var _ = Describe("Model.GenerateChannel", func() {
 			bgCtx := context.Background()
 			tokenCh, errCh := ctx.GenerateChannel(bgCtx, "The capital of France is",
 				llama.WithMaxTokens(20),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 				llama.WithTemperature(0.5))
 
 			var result strings.Builder
@@ -615,7 +623,7 @@ var _ = Describe("Model.GenerateChannel", func() {
 				go func(streamID int) {
 					bgCtx := context.Background()
 					tokenCh, errCh := ctx.GenerateChannel(bgCtx, "Hello",
-						llama.WithMaxTokens(10))
+						llama.WithMaxTokens(10), llama.WithIgnoreEOS(true))
 
 					var result strings.Builder
 					var err error
@@ -661,7 +669,7 @@ var _ = Describe("Model.GenerateChannel", func() {
 					defer GinkgoRecover()
 					bgCtx := context.Background()
 					tokenCh, errCh := ctx.GenerateChannel(bgCtx, "Test",
-						llama.WithMaxTokens(5))
+						llama.WithMaxTokens(5), llama.WithIgnoreEOS(true))
 
 					tokenCount := 0
 				Loop:
@@ -732,7 +740,7 @@ var _ = Describe("Channel Streaming Edge Cases", func() {
 		It("should handle context.Background()", Label("integration", "channel"), func() {
 			bgCtx := context.Background()
 			tokenCh, errCh := ctx.GenerateChannel(bgCtx, "Test",
-				llama.WithMaxTokens(10))
+				llama.WithMaxTokens(10), llama.WithIgnoreEOS(true))
 
 			var result strings.Builder
 		Loop:
@@ -783,7 +791,7 @@ var _ = Describe("Channel Streaming Edge Cases", func() {
 		It("should handle reading only from token channel", Label("integration", "channel"), func() {
 			bgCtx := context.Background()
 			tokenCh, _ := ctx.GenerateChannel(bgCtx, "Hello",
-				llama.WithMaxTokens(10))
+				llama.WithMaxTokens(10), llama.WithIgnoreEOS(true))
 
 			var result strings.Builder
 			for token := range tokenCh {
@@ -796,7 +804,7 @@ var _ = Describe("Channel Streaming Edge Cases", func() {
 		It("should handle slow consumer", Label("integration", "channel", "slow"), func() {
 			bgCtx := context.Background()
 			tokenCh, errCh := ctx.GenerateChannel(bgCtx, "Test",
-				llama.WithMaxTokens(20))
+				llama.WithMaxTokens(20), llama.WithIgnoreEOS(true))
 
 			var result strings.Builder
 			var err error
@@ -823,7 +831,7 @@ var _ = Describe("Channel Streaming Edge Cases", func() {
 		It("should handle fast consumer", Label("integration", "channel"), func() {
 			bgCtx := context.Background()
 			tokenCh, errCh := ctx.GenerateChannel(bgCtx, "Test",
-				llama.WithMaxTokens(50))
+				llama.WithMaxTokens(50), llama.WithIgnoreEOS(true))
 
 			tokenCount := 0
 			var err error
@@ -851,7 +859,7 @@ var _ = Describe("Channel Streaming Edge Cases", func() {
 		It("should handle very short prompt", Label("integration", "channel"), func() {
 			bgCtx := context.Background()
 			tokenCh, errCh := ctx.GenerateChannel(bgCtx, "Hi",
-				llama.WithMaxTokens(10))
+				llama.WithMaxTokens(10), llama.WithIgnoreEOS(true))
 
 			var result strings.Builder
 			var err error

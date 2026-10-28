@@ -48,6 +48,7 @@ var _ = Describe("Thread Configuration", Label("thread-config"), func() {
 			// Should complete without hanging (threads configured correctly)
 			result, err := ctx.Generate("Hello",
 				llama.WithMaxTokens(5),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).NotTo(BeEmpty())
@@ -63,6 +64,7 @@ var _ = Describe("Thread Configuration", Label("thread-config"), func() {
 
 			result, err := ctx.Generate("Hello",
 				llama.WithMaxTokens(5),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).NotTo(BeEmpty())
@@ -78,6 +80,7 @@ var _ = Describe("Thread Configuration", Label("thread-config"), func() {
 
 			result, err := ctx.Generate("Test",
 				llama.WithMaxTokens(3),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).NotTo(BeEmpty())
@@ -94,6 +97,7 @@ var _ = Describe("Thread Configuration", Label("thread-config"), func() {
 
 			result, err := ctx.Generate("Test",
 				llama.WithMaxTokens(3),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).NotTo(BeEmpty())
@@ -113,6 +117,7 @@ var _ = Describe("Thread Configuration", Label("thread-config"), func() {
 			// Should complete without hanging (batch threads configured correctly)
 			result, err := ctx.Generate("Hello",
 				llama.WithMaxTokens(5),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).NotTo(BeEmpty())
@@ -130,6 +135,7 @@ var _ = Describe("Thread Configuration", Label("thread-config"), func() {
 
 			result, err := ctx.Generate("Test",
 				llama.WithMaxTokens(5),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).NotTo(BeEmpty())
@@ -146,6 +152,7 @@ var _ = Describe("Thread Configuration", Label("thread-config"), func() {
 
 			result, err := ctx.Generate("Test",
 				llama.WithMaxTokens(10),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).NotTo(BeEmpty())
@@ -168,6 +175,7 @@ var _ = Describe("Thread Configuration", Label("thread-config"), func() {
 
 			result, err := gpuCtx.Generate("Hello",
 				llama.WithMaxTokens(5),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).NotTo(BeEmpty())
@@ -188,6 +196,7 @@ var _ = Describe("Thread Configuration", Label("thread-config"), func() {
 
 			result, err := gpuCtx.Generate("Test",
 				llama.WithMaxTokens(5),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).NotTo(BeEmpty())
@@ -206,6 +215,7 @@ var _ = Describe("Thread Configuration", Label("thread-config"), func() {
 
 			result, err := ctx.Generate("Test",
 				llama.WithMaxTokens(5),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).NotTo(BeEmpty())
@@ -222,6 +232,7 @@ var _ = Describe("Thread Configuration", Label("thread-config"), func() {
 
 			result, err := ctx.Generate("Test",
 				llama.WithMaxTokens(5),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).NotTo(BeEmpty())
@@ -238,6 +249,7 @@ var _ = Describe("Thread Configuration", Label("thread-config"), func() {
 
 			result, err := ctx.Generate("Test",
 				llama.WithMaxTokens(5),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).NotTo(BeEmpty())

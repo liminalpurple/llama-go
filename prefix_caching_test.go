@@ -54,6 +54,7 @@ var _ = Describe("Prefix Caching", Label("prefix-caching"), func() {
 				result, err := ctx.Generate(prompt,
 					llama.WithSeed(int(seed)),
 					llama.WithMaxTokens(10),
+					llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 				)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(result).NotTo(BeEmpty())
@@ -80,6 +81,7 @@ var _ = Describe("Prefix Caching", Label("prefix-caching"), func() {
 			resultWithCache, err := ctx.Generate(prompt,
 				llama.WithSeed(int(seed)),
 				llama.WithMaxTokens(10),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(resultWithCache).NotTo(BeEmpty())
@@ -96,6 +98,7 @@ var _ = Describe("Prefix Caching", Label("prefix-caching"), func() {
 			resultWithoutCache, err := ctx.Generate(prompt,
 				llama.WithSeed(int(seed)),
 				llama.WithMaxTokens(10),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(resultWithoutCache).NotTo(BeEmpty())
@@ -119,7 +122,7 @@ var _ = Describe("Prefix Caching", Label("prefix-caching"), func() {
 				Expect(err).NotTo(HaveOccurred())
 				defer func() { Expect(fresh.Close()).To(Succeed()) }()
 
-				result, err := fresh.Generate(prompt, llama.WithTemperature(0), llama.WithMaxTokens(20))
+				result, err := fresh.Generate(prompt, llama.WithTemperature(0), llama.WithMaxTokens(20), llama.WithIgnoreEOS(true))
 				Expect(err).NotTo(HaveOccurred())
 				return result
 			}
@@ -133,8 +136,14 @@ var _ = Describe("Prefix Caching", Label("prefix-caching"), func() {
 			// The shared prefix is longer than a typical sliding window (Gemma 3
 			// uses 1024), and the first prompt runs well past it, beyond the
 			// n_ubatch slack the windowed cache keeps, so cells the second prompt
-			// needs have been overwritten by the time it's reused
-			expectLongPrefixReuse := func() {
+			// needs have been overwritten by the time it's reused.
+			//
+			// Both contexts decode the shared prefix as exactly one batch, so
+			// every cached token is computed in the same batch either way and
+			// any difference comes from the cache. With a different split, the
+			// prefix's last tokens share a batch with different neighbours,
+			// which can tip a near-tie later on (as it does on Gemma 4).
+			expectLongPrefixReuse := func(opts ...llama.ContextOption) {
 				var history, detour strings.Builder
 				for i := 1; i <= 120; i++ {
 					fmt.Fprintf(&history, "Line %d: the lighthouse keeper logged a calm night. ", i)
@@ -145,12 +154,30 @@ var _ = Describe("Prefix Caching", Label("prefix-caching"), func() {
 				longFirst := history.String() + detour.String() + "The keeper's favourite colour was"
 				longSecond := history.String() + "The keeper's cat was called"
 
-				_, err := ctx.Generate(longFirst, llama.WithTemperature(0), llama.WithMaxTokens(20))
+				firstTokens, err := ctx.Tokenize(longFirst)
+				Expect(err).NotTo(HaveOccurred())
+				secondTokens, err := ctx.Tokenize(longSecond)
+				Expect(err).NotTo(HaveOccurred())
+				shared := 0
+				for shared < len(firstTokens) && shared < len(secondTokens) && firstTokens[shared] == secondTokens[shared] {
+					shared++
+				}
+				contextOpts := append([]llama.ContextOption{llama.WithContext(4096), llama.WithBatch(shared)}, opts...)
+
+				Expect(ctx.Close()).To(Succeed())
+				ctx, err = model.NewContext(append(contextOpts, llama.WithPrefixCaching(true))...)
+				Expect(err).NotTo(HaveOccurred())
+				_, err = ctx.Generate(longFirst, llama.WithTemperature(0), llama.WithMaxTokens(20))
+				Expect(err).NotTo(HaveOccurred())
+				reused, err := ctx.Generate(longSecond, llama.WithTemperature(0), llama.WithMaxTokens(20), llama.WithIgnoreEOS(true))
 				Expect(err).NotTo(HaveOccurred())
 
-				reused, err := ctx.Generate(longSecond, llama.WithTemperature(0), llama.WithMaxTokens(20))
+				fresh, err := model.NewContext(append(contextOpts, llama.WithPrefixCaching(false))...)
 				Expect(err).NotTo(HaveOccurred())
-				Expect(reused).To(Equal(generateFresh(longSecond)))
+				defer func() { Expect(fresh.Close()).To(Succeed()) }()
+				expected, err := fresh.Generate(longSecond, llama.WithTemperature(0), llama.WithMaxTokens(20), llama.WithIgnoreEOS(true))
+				Expect(err).NotTo(HaveOccurred())
+				Expect(reused).To(Equal(expected))
 			}
 
 			It("should match a fresh context when a long prompt shares a prefix", Label("integration"), func() {
@@ -158,19 +185,14 @@ var _ = Describe("Prefix Caching", Label("prefix-caching"), func() {
 			})
 
 			It("should match a fresh context when a long prompt shares a prefix with a full-size SWA cache", Label("integration"), func() {
-				Expect(ctx.Close()).To(Succeed())
-				var err error
-				ctx, err = model.NewContext(llama.WithContext(4096), llama.WithPrefixCaching(true), llama.WithSWAFull(true))
-				Expect(err).NotTo(HaveOccurred())
-
-				expectLongPrefixReuse()
+				expectLongPrefixReuse(llama.WithSWAFull(true))
 			})
 
 			It("should match a fresh context when the prompt shares a prefix", Label("integration"), func() {
 				_, err := ctx.Generate(first, llama.WithTemperature(0), llama.WithMaxTokens(20))
 				Expect(err).NotTo(HaveOccurred())
 
-				reused, err := ctx.Generate(second, llama.WithTemperature(0), llama.WithMaxTokens(20))
+				reused, err := ctx.Generate(second, llama.WithTemperature(0), llama.WithMaxTokens(20), llama.WithIgnoreEOS(true))
 				Expect(err).NotTo(HaveOccurred())
 				Expect(reused).To(Equal(generateFresh(second)))
 			})
@@ -179,7 +201,7 @@ var _ = Describe("Prefix Caching", Label("prefix-caching"), func() {
 				_, err := ctx.Generate(first, llama.WithTemperature(0), llama.WithMaxTokens(20))
 				Expect(err).NotTo(HaveOccurred())
 
-				reused, err := ctx.Generate(first, llama.WithTemperature(0), llama.WithMaxTokens(20))
+				reused, err := ctx.Generate(first, llama.WithTemperature(0), llama.WithMaxTokens(20), llama.WithIgnoreEOS(true))
 				Expect(err).NotTo(HaveOccurred())
 				Expect(reused).To(Equal(generateFresh(first)))
 			})
@@ -200,6 +222,7 @@ var _ = Describe("Prefix Caching", Label("prefix-caching"), func() {
 			// First generation establishes cache
 			result1, err := ctx.Generate(prompt,
 				llama.WithMaxTokens(5),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result1).NotTo(BeEmpty())
@@ -207,6 +230,7 @@ var _ = Describe("Prefix Caching", Label("prefix-caching"), func() {
 			// Second generation should reuse cache (faster)
 			result2, err := ctx.Generate(prompt,
 				llama.WithMaxTokens(5),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result2).NotTo(BeEmpty())
@@ -234,6 +258,7 @@ var _ = Describe("Prefix Caching", Label("prefix-caching"), func() {
 			// Extended prompt should reuse partial cache
 			result, err := ctx.Generate(extendedPrompt,
 				llama.WithMaxTokens(3),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).NotTo(BeEmpty())
@@ -268,6 +293,7 @@ var _ = Describe("Prefix Caching", Label("prefix-caching"), func() {
 
 			result, err := ctx.Generate(prompt,
 				llama.WithMaxTokens(5),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).NotTo(BeEmpty())
@@ -288,6 +314,7 @@ var _ = Describe("Prefix Caching", Label("prefix-caching"), func() {
 			result1, err := ctx.Generate(prompt,
 				llama.WithSeed(seed),
 				llama.WithMaxTokens(5),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -303,6 +330,7 @@ var _ = Describe("Prefix Caching", Label("prefix-caching"), func() {
 			result2, err := ctx.Generate(prompt,
 				llama.WithSeed(seed),
 				llama.WithMaxTokens(5),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -318,6 +346,7 @@ var _ = Describe("Prefix Caching", Label("prefix-caching"), func() {
 			result3, err := ctx.Generate(prompt,
 				llama.WithSeed(seed),
 				llama.WithMaxTokens(5),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 

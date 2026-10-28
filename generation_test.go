@@ -59,6 +59,7 @@ var _ = Describe("Model.Generate", func() {
 		It("should generate text successfully", Label("integration"), func() {
 			response, err := ctx.Generate("The capital of France is",
 				llama.WithMaxTokens(10),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
@@ -67,6 +68,7 @@ var _ = Describe("Model.Generate", func() {
 		It("should return non-empty response", Label("integration"), func() {
 			response, err := ctx.Generate("Hello",
 				llama.WithMaxTokens(5),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(len(response)).To(BeNumerically(">", 0))
@@ -85,6 +87,7 @@ var _ = Describe("Model.Generate", func() {
 			// Test that generation completes without hanging (previous bug)
 			response, err := ctx.Generate("The quick brown fox",
 				llama.WithMaxTokens(20),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
@@ -133,6 +136,7 @@ var _ = Describe("Model.Generate", func() {
 			response, err := ctx.Generate("Hello",
 				llama.WithMaxTokens(10),
 				llama.WithTemperature(0.5),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
@@ -142,6 +146,7 @@ var _ = Describe("Model.Generate", func() {
 			response, err := ctx.Generate("Hello",
 				llama.WithMaxTokens(10),
 				llama.WithTopP(0.9),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
@@ -151,6 +156,7 @@ var _ = Describe("Model.Generate", func() {
 			response, err := ctx.Generate("Hello",
 				llama.WithMaxTokens(10),
 				llama.WithTopK(20),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
@@ -162,6 +168,7 @@ var _ = Describe("Model.Generate", func() {
 				llama.WithMaxTokens(10),
 				llama.WithSeed(12345),
 				llama.WithTemperature(0.8),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -169,6 +176,7 @@ var _ = Describe("Model.Generate", func() {
 				llama.WithMaxTokens(10),
 				llama.WithSeed(12345),
 				llama.WithTemperature(0.8),
+				llama.WithIgnoreEOS(true),
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -176,17 +184,20 @@ var _ = Describe("Model.Generate", func() {
 		})
 
 		It("should generate different outputs with different seeds", Label("integration"), func() {
-			response1, err := ctx.Generate("The capital of France is",
-				llama.WithMaxTokens(10),
+			// A prompt with many likely continuations, so the seed decides
+			response1, err := ctx.Generate("Once upon a time,",
+				llama.WithMaxTokens(20),
 				llama.WithSeed(12345),
 				llama.WithTemperature(0.8),
+				llama.WithIgnoreEOS(true),
 			)
 			Expect(err).NotTo(HaveOccurred())
 
-			response2, err := ctx.Generate("The capital of France is",
-				llama.WithMaxTokens(10),
+			response2, err := ctx.Generate("Once upon a time,",
+				llama.WithMaxTokens(20),
 				llama.WithSeed(54321),
 				llama.WithTemperature(0.8),
+				llama.WithIgnoreEOS(true),
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -199,6 +210,7 @@ var _ = Describe("Model.Generate", func() {
 				llama.WithMaxTokens(30),
 				llama.WithSeed(-1),
 				llama.WithTemperature(1.2),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -206,6 +218,7 @@ var _ = Describe("Model.Generate", func() {
 				llama.WithMaxTokens(30),
 				llama.WithSeed(-1),
 				llama.WithTemperature(1.2),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -215,11 +228,13 @@ var _ = Describe("Model.Generate", func() {
 
 		It("should apply WithRepeatPenalty to generated tokens", Label("integration"), func() {
 			// Greedy decoding of this prompt loops on "Hello world", so a penalty
-			// only changes the output if it sees the tokens generated so far
+			// only changes the output if it sees the tokens generated so far.
+			// Ignoring EOS keeps models that would end after "!" going.
 			generate := func(penalty float32) string {
 				response, err := ctx.Generate("Hello world",
 					llama.WithMaxTokens(50),
 					llama.WithTemperature(0),
+					llama.WithIgnoreEOS(true),
 					llama.WithRepeatPenalty(penalty),
 					llama.WithPenaltyLastN(64),
 				)
@@ -227,7 +242,8 @@ var _ = Describe("Model.Generate", func() {
 				return response
 			}
 
-			Expect(generate(1.5)).NotTo(Equal(generate(1.0)))
+			// Confident models such as Gemma 4 need a strong penalty to flip a token
+			Expect(generate(3.0)).NotTo(Equal(generate(1.0)))
 		})
 	})
 
@@ -264,6 +280,7 @@ var _ = Describe("Model.Generate", func() {
 		It("should accept max_tokens=1 (minimum valid)", Label("integration"), func() {
 			response, err := ctx.Generate("Hello",
 				llama.WithMaxTokens(1),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
@@ -281,6 +298,7 @@ var _ = Describe("Model.Generate", func() {
 		It("should use default when max_tokens=0", Label("integration"), func() {
 			result, err := ctx.Generate("Hello",
 				llama.WithMaxTokens(0),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).NotTo(BeEmpty())
@@ -341,6 +359,7 @@ var _ = Describe("Model.Generate", func() {
 			response, err := ctx.Generate("Tell me a story",
 				llama.WithMaxTokens(100),
 				llama.WithStopWords(".", "!", "?"),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			// Should stop at first punctuation
@@ -351,6 +370,7 @@ var _ = Describe("Model.Generate", func() {
 			response, err := ctx.Generate("The quick brown fox",
 				llama.WithMaxTokens(50),
 				llama.WithStopWords("fox"),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			// Should have some output before stop word
@@ -361,6 +381,7 @@ var _ = Describe("Model.Generate", func() {
 			response, err := ctx.Generate("Hello world",
 				llama.WithMaxTokens(10),
 				llama.WithStopWords("ZZZZZ"), // Unlikely stop word
+				llama.WithIgnoreEOS(true),    // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			// Should generate until max_tokens
@@ -381,6 +402,7 @@ var _ = Describe("Model.Generate", func() {
 			response, err := ctx.Generate("Count to 10",
 				llama.WithMaxTokens(100),
 				llama.WithStopWords("5"),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
@@ -472,6 +494,7 @@ var _ = Describe("Model.Generate", func() {
 		It("should accept prompt under context limit", Label("integration"), func() {
 			response, err := ctx.Generate("Short prompt",
 				llama.WithMaxTokens(10),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
@@ -595,6 +618,7 @@ var _ = Describe("Model.Generate", func() {
 			response, err := ctx.Generate("Hello",
 				llama.WithMaxTokens(5),
 				llama.WithDebug(),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
@@ -663,6 +687,7 @@ var _ = Describe("Model.Generate", func() {
 			// Normal configuration should work
 			response, err := ctx.Generate("Test",
 				llama.WithMaxTokens(10),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
@@ -715,6 +740,7 @@ var _ = Describe("Generation Edge Cases", func() {
 			response, err := ctx.Generate("The capital of France is",
 				llama.WithMaxTokens(10),
 				llama.WithTemperature(0.0),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
@@ -724,6 +750,7 @@ var _ = Describe("Generation Edge Cases", func() {
 			response, err := ctx.Generate("Hello",
 				llama.WithMaxTokens(10),
 				llama.WithTemperature(2.0),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
@@ -733,6 +760,7 @@ var _ = Describe("Generation Edge Cases", func() {
 			response, err := ctx.Generate("Hello",
 				llama.WithMaxTokens(10),
 				llama.WithTopP(1.0),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
@@ -742,6 +770,7 @@ var _ = Describe("Generation Edge Cases", func() {
 			response, err := ctx.Generate("Hello",
 				llama.WithMaxTokens(10),
 				llama.WithTopK(1),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
@@ -779,12 +808,12 @@ var _ = Describe("Generation Edge Cases", func() {
 		})
 
 		It("should stop on EOS token", Label("integration"), func() {
-			// EOS token stops generation naturally
-			response, err := ctx.Generate("Hello",
+			// EOS token stops generation naturally; a model that ends straight
+			// away returns nothing, which is still a clean stop
+			_, err := ctx.Generate("Hello",
 				llama.WithMaxTokens(100),
 			)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(response).NotTo(BeEmpty())
 		})
 
 		It("should generate past the end token with WithIgnoreEOS", Label("integration"), func() {
@@ -801,6 +830,7 @@ var _ = Describe("Generation Edge Cases", func() {
 		It("should stop at max_tokens limit", Label("integration"), func() {
 			response, err := ctx.Generate("Count to 1000:",
 				llama.WithMaxTokens(5),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			// Should stop at 5 tokens, not complete counting

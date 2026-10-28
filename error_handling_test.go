@@ -147,7 +147,7 @@ var _ = Describe("Generation Errors", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Generation should succeed because default context size was applied
-			response, err := ctx.Generate("Hello", llama.WithMaxTokens(1))
+			response, err := ctx.Generate("Hello", llama.WithMaxTokens(1), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
 		})
@@ -215,7 +215,7 @@ var _ = Describe("Generation Errors", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// max_tokens=0 should use default (128), not error
-			result, err := ctx.Generate("Hello", llama.WithMaxTokens(0))
+			result, err := ctx.Generate("Hello", llama.WithMaxTokens(0), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).NotTo(BeEmpty())
 		})
@@ -255,7 +255,7 @@ var _ = Describe("Generation Errors", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Normal generation should succeed with valid parameters
-			response, err := ctx.Generate("Hello", llama.WithMaxTokens(5))
+			response, err := ctx.Generate("Hello", llama.WithMaxTokens(5), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
 		})
@@ -290,7 +290,7 @@ var _ = Describe("Generation Errors", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Normal generation should not throw exceptions
-			response, err := ctx.Generate("Hello", llama.WithMaxTokens(5))
+			response, err := ctx.Generate("Hello", llama.WithMaxTokens(5), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
 		})
@@ -572,10 +572,9 @@ var _ = Describe("Debug Messages", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Generate with debug enabled
-			// EOS token should be encountered naturally
-			response, err := ctx.Generate("Say hello:", llama.WithMaxTokens(50), llama.WithDebug())
+			// EOS token should be encountered naturally, possibly straight away
+			_, err = ctx.Generate("Say hello:", llama.WithMaxTokens(50), llama.WithDebug())
 			Expect(err).NotTo(HaveOccurred())
-			Expect(response).NotTo(BeEmpty())
 
 			// Debug message "INFO: End of generation token encountered" should appear on stderr
 			// Verification requires stderr capture
@@ -596,7 +595,7 @@ var _ = Describe("Debug Messages", func() {
 				return false // Stop after first token
 			}
 
-			err = ctx.GenerateStream("Hello", callback, llama.WithMaxTokens(50), llama.WithDebug())
+			err = ctx.GenerateStream("Hello", callback, llama.WithMaxTokens(50), llama.WithDebug(), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(tokenCount).To(Equal(1))
 
@@ -612,7 +611,7 @@ var _ = Describe("Debug Messages", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Generate with stop word that should be encountered
-			response, err := ctx.Generate("Hello world", llama.WithMaxTokens(50), llama.WithStopWords("world"), llama.WithDebug())
+			response, err := ctx.Generate("Hello world", llama.WithMaxTokens(50), llama.WithStopWords("world"), llama.WithDebug(), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
 

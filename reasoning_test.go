@@ -55,13 +55,21 @@ var _ = Describe("Reasoning", func() {
 
 		// What the model would write with thinking on: some templates open
 		// the thinking block at the end of the prompt, so the model's output
-		// starts inside it
+		// starts inside it. The sample uses <think> tags, so templates that
+		// mark thinking differently, such as Gemma 4's, skip these.
 		var output string
 		BeforeEach(func() {
 			prompt, err := model.FormatChatPrompt(messages, thinking)
 			Expect(err).NotTo(HaveOccurred())
+			promptOff, err := model.FormatChatPrompt(messages, llama.ChatOptions{EnableThinking: llama.Bool(false)})
+			Expect(err).NotTo(HaveOccurred())
+
+			opensThinking := strings.HasSuffix(strings.TrimSpace(prompt), "<think>")
+			if !opensThinking && !strings.Contains(promptOff, "</think>") {
+				Skip("chat template doesn't use <think> tags")
+			}
 			output = "\nTwo plus two.\n</think>\n\nFour"
-			if !strings.HasSuffix(strings.TrimSpace(prompt), "<think>") {
+			if !opensThinking {
 				output = "<think>" + output
 			}
 		})
@@ -96,10 +104,14 @@ var _ = Describe("Reasoning", func() {
 	})
 
 	Describe("Rendering the prompt", Label("integration", "chat", "reasoning"), func() {
-		It("should render the template's empty thinking block when thinking is off", func() {
-			prompt, err := model.FormatChatPrompt(messages, llama.ChatOptions{EnableThinking: llama.Bool(false)})
+		It("should render the prompt differently with thinking on and off", func() {
+			// Templates mark this differently: Qwen adds an empty thinking block
+			// when it's off, and Gemma 4 a flag when it's on
+			on, err := model.FormatChatPrompt(messages, llama.ChatOptions{EnableThinking: llama.Bool(true)})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(prompt).To(ContainSubstring("</think>"))
+			off, err := model.FormatChatPrompt(messages, llama.ChatOptions{EnableThinking: llama.Bool(false)})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(on).NotTo(Equal(off))
 		})
 
 		It("should leave the thinking block to the model when thinking is on", func() {

@@ -44,7 +44,7 @@ var _ = Describe("GPU Layer Configuration", Label("gpu-layers"), func() {
 
 			// Should use GPU (verify by checking generation isn't painfully slow)
 			start := time.Now()
-			result, err := ctx.Generate("Test", llama.WithMaxTokens(5))
+			result, err := ctx.Generate("Test", llama.WithMaxTokens(5), llama.WithIgnoreEOS(true))
 			duration := time.Since(start)
 
 			Expect(err).NotTo(HaveOccurred())
@@ -64,6 +64,7 @@ var _ = Describe("GPU Layer Configuration", Label("gpu-layers"), func() {
 
 			result, err := ctx.Generate("Hello world",
 				llama.WithMaxTokens(10),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).NotTo(BeEmpty())
@@ -81,6 +82,7 @@ var _ = Describe("GPU Layer Configuration", Label("gpu-layers"), func() {
 
 			result, err := ctx.Generate("Test",
 				llama.WithMaxTokens(5),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).NotTo(BeEmpty())
@@ -96,6 +98,7 @@ var _ = Describe("GPU Layer Configuration", Label("gpu-layers"), func() {
 
 			result, err := ctx.Generate("Hello",
 				llama.WithMaxTokens(5),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).NotTo(BeEmpty())
@@ -112,6 +115,7 @@ var _ = Describe("GPU Layer Configuration", Label("gpu-layers"), func() {
 
 			result, err := ctx.Generate("Test",
 				llama.WithMaxTokens(5),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).NotTo(BeEmpty())
@@ -127,6 +131,7 @@ var _ = Describe("GPU Layer Configuration", Label("gpu-layers"), func() {
 
 			result, err := ctx.Generate("Test",
 				llama.WithMaxTokens(5),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).NotTo(BeEmpty())
@@ -143,6 +148,7 @@ var _ = Describe("GPU Layer Configuration", Label("gpu-layers"), func() {
 
 			result, err := ctx.Generate("Test",
 				llama.WithMaxTokens(5),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).NotTo(BeEmpty())
@@ -166,6 +172,7 @@ var _ = Describe("GPU Layer Configuration", Label("gpu-layers"), func() {
 			startCPU := time.Now()
 			resultCPU, err := cpuCtx.Generate("Test prompt for timing",
 				llama.WithMaxTokens(10),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			cpuDuration := time.Since(startCPU)
 			Expect(err).NotTo(HaveOccurred())
@@ -183,6 +190,7 @@ var _ = Describe("GPU Layer Configuration", Label("gpu-layers"), func() {
 			startGPU := time.Now()
 			resultGPU, err := gpuCtx.Generate("Test prompt for timing",
 				llama.WithMaxTokens(10),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			gpuDuration := time.Since(startGPU)
 			Expect(err).NotTo(HaveOccurred())
@@ -208,7 +216,7 @@ var _ = Describe("GPU Layer Configuration", Label("gpu-layers"), func() {
 			defer func() { Expect(ctx0.Close()).To(Succeed()) }()
 
 			start0 := time.Now()
-			_, err = ctx0.Generate(prompt, llama.WithMaxTokens(maxTokens))
+			_, err = ctx0.Generate(prompt, llama.WithMaxTokens(maxTokens), llama.WithIgnoreEOS(true))
 			duration0 := time.Since(start0)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -222,7 +230,7 @@ var _ = Describe("GPU Layer Configuration", Label("gpu-layers"), func() {
 			defer func() { Expect(ctx14.Close()).To(Succeed()) }()
 
 			start14 := time.Now()
-			_, err = ctx14.Generate(prompt, llama.WithMaxTokens(maxTokens))
+			_, err = ctx14.Generate(prompt, llama.WithMaxTokens(maxTokens), llama.WithIgnoreEOS(true))
 			duration14 := time.Since(start14)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -236,7 +244,7 @@ var _ = Describe("GPU Layer Configuration", Label("gpu-layers"), func() {
 			defer func() { Expect(ctxAll.Close()).To(Succeed()) }()
 
 			startAll := time.Now()
-			_, err = ctxAll.Generate(prompt, llama.WithMaxTokens(maxTokens))
+			_, err = ctxAll.Generate(prompt, llama.WithMaxTokens(maxTokens), llama.WithIgnoreEOS(true))
 			durationAll := time.Since(startAll)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -261,6 +269,7 @@ var _ = Describe("GPU Layer Configuration", Label("gpu-layers"), func() {
 
 			result, err := ctx.Generate("Test",
 				llama.WithMaxTokens(5),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).NotTo(BeEmpty())
@@ -280,6 +289,7 @@ var _ = Describe("GPU Layer Configuration", Label("gpu-layers"), func() {
 
 			result, err := ctx.Generate("Test",
 				llama.WithMaxTokens(10),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).NotTo(BeEmpty())
@@ -297,6 +307,7 @@ var _ = Describe("GPU Layer Configuration", Label("gpu-layers"), func() {
 
 			result, err := ctx.Generate("Test",
 				llama.WithMaxTokens(10),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).NotTo(BeEmpty())
@@ -317,6 +328,7 @@ var _ = Describe("GPU Layer Configuration", Label("gpu-layers"), func() {
 
 			result, err := ctx.Generate("Test",
 				llama.WithMaxTokens(10),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).NotTo(BeEmpty())

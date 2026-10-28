@@ -50,7 +50,7 @@ var _ = Describe("LoadModel", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer func() { Expect(ctx.Close()).To(Succeed()) }()
 
-			response, err := ctx.Generate("test", llama.WithMaxTokens(1))
+			response, err := ctx.Generate("test", llama.WithMaxTokens(1), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
 		})
@@ -67,7 +67,7 @@ var _ = Describe("LoadModel", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer func() { Expect(ctx.Close()).To(Succeed()) }()
 
-			response, err := ctx.Generate("test", llama.WithMaxTokens(1))
+			response, err := ctx.Generate("test", llama.WithMaxTokens(1), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
 		})
@@ -154,7 +154,7 @@ var _ = Describe("LoadModel", func() {
 			defer func() { Expect(ctx.Close()).To(Succeed()) }()
 
 			// Verify context size by attempting generation
-			response, err := ctx.Generate("Hello", llama.WithMaxTokens(10))
+			response, err := ctx.Generate("Hello", llama.WithMaxTokens(10), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
 		})
@@ -170,7 +170,7 @@ var _ = Describe("LoadModel", func() {
 			defer func() { Expect(ctx.Close()).To(Succeed()) }()
 
 			// Verify batch size by performing generation
-			response, err := ctx.Generate("Test", llama.WithMaxTokens(10))
+			response, err := ctx.Generate("Test", llama.WithMaxTokens(10), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
 		})
@@ -186,7 +186,7 @@ var _ = Describe("LoadModel", func() {
 			defer func() { Expect(ctx.Close()).To(Succeed()) }()
 
 			// Verify threads by performing generation
-			response, err := ctx.Generate("Test", llama.WithMaxTokens(10))
+			response, err := ctx.Generate("Test", llama.WithMaxTokens(10), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
 		})
@@ -202,7 +202,7 @@ var _ = Describe("LoadModel", func() {
 			defer func() { Expect(ctx.Close()).To(Succeed()) }()
 
 			// GPU layers configured, verify basic operation
-			response, err := ctx.Generate("Test", llama.WithMaxTokens(10))
+			response, err := ctx.Generate("Test", llama.WithMaxTokens(10), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
 		})
@@ -221,7 +221,7 @@ var _ = Describe("LoadModel", func() {
 			defer func() { Expect(ctx.Close()).To(Succeed()) }()
 
 			// F16 memory enabled, verify operation
-			response, err := ctx.Generate("Test", llama.WithMaxTokens(10))
+			response, err := ctx.Generate("Test", llama.WithMaxTokens(10), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
 		})
@@ -237,7 +237,7 @@ var _ = Describe("LoadModel", func() {
 			defer func() { Expect(ctx.Close()).To(Succeed()) }()
 
 			// MLock enabled, verify operation
-			response, err := ctx.Generate("Test", llama.WithMaxTokens(10))
+			response, err := ctx.Generate("Test", llama.WithMaxTokens(10), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
 		})
@@ -253,7 +253,7 @@ var _ = Describe("LoadModel", func() {
 			defer func() { Expect(ctx.Close()).To(Succeed()) }()
 
 			// MMap disabled, verify operation
-			response, err := ctx.Generate("Test", llama.WithMaxTokens(10))
+			response, err := ctx.Generate("Test", llama.WithMaxTokens(10), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
 		})
@@ -326,7 +326,7 @@ var _ = Describe("LoadModel", func() {
 			defer func() { Expect(ctx.Close()).To(Succeed()) }()
 
 			// All options applied, verify operation
-			response, err := ctx.Generate("Test", llama.WithMaxTokens(10))
+			response, err := ctx.Generate("Test", llama.WithMaxTokens(10), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
 		})
@@ -353,7 +353,7 @@ var _ = Describe("LoadModel", func() {
 			defer func() { Expect(ctx.Close()).To(Succeed()) }()
 
 			// Context created successfully, verify by successful generation
-			response, err := ctx.Generate("Test", llama.WithMaxTokens(10))
+			response, err := ctx.Generate("Test", llama.WithMaxTokens(10), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
 		})
@@ -369,7 +369,7 @@ var _ = Describe("LoadModel", func() {
 			defer func() { Expect(ctx.Close()).To(Succeed()) }()
 
 			// Default batch is 512, verify by successful generation
-			response, err := ctx.Generate("Test", llama.WithMaxTokens(10))
+			response, err := ctx.Generate("Test", llama.WithMaxTokens(10), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
 		})
@@ -385,7 +385,7 @@ var _ = Describe("LoadModel", func() {
 			defer func() { Expect(ctx.Close()).To(Succeed()) }()
 
 			// Default is CPU-only, verify operation
-			response, err := ctx.Generate("Test", llama.WithMaxTokens(10))
+			response, err := ctx.Generate("Test", llama.WithMaxTokens(10), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
 		})
@@ -404,7 +404,7 @@ var _ = Describe("LoadModel", func() {
 			expectedThreads := runtime.NumCPU()
 			Expect(expectedThreads).To(BeNumerically(">", 0))
 
-			response, err := ctx.Generate("Test", llama.WithMaxTokens(10))
+			response, err := ctx.Generate("Test", llama.WithMaxTokens(10), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
 		})
@@ -420,7 +420,7 @@ var _ = Describe("LoadModel", func() {
 			defer func() { Expect(ctx.Close()).To(Succeed()) }()
 
 			// MMap enabled by default, verify operation
-			response, err := ctx.Generate("Test", llama.WithMaxTokens(10))
+			response, err := ctx.Generate("Test", llama.WithMaxTokens(10), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
 		})
@@ -732,7 +732,7 @@ var _ = Describe("Model Finaliser", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer func() { Expect(ctx.Close()).To(Succeed()) }()
 
-			response, err := ctx.Generate("Test", llama.WithMaxTokens(5))
+			response, err := ctx.Generate("Test", llama.WithMaxTokens(5), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
 		})
@@ -764,7 +764,7 @@ var _ = Describe("Progress Callbacks", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer func() { Expect(ctx.Close()).To(Succeed()) }()
 
-			response, err := ctx.Generate("test", llama.WithMaxTokens(1))
+			response, err := ctx.Generate("test", llama.WithMaxTokens(1), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
 		})
@@ -785,7 +785,7 @@ var _ = Describe("Progress Callbacks", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer func() { Expect(ctx.Close()).To(Succeed()) }()
 
-			response, err := ctx.Generate("Test", llama.WithMaxTokens(5))
+			response, err := ctx.Generate("Test", llama.WithMaxTokens(5), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
 		})
@@ -913,7 +913,7 @@ var _ = Describe("Progress Callbacks", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer func() { Expect(ctx.Close()).To(Succeed()) }()
 
-			response, err := ctx.Generate("Test", llama.WithMaxTokens(5))
+			response, err := ctx.Generate("Test", llama.WithMaxTokens(5), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
 		})
@@ -1020,7 +1020,7 @@ var _ = Describe("Progress Callbacks", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer func() { Expect(ctx1.Close()).To(Succeed()) }()
 
-			response1, err := ctx1.Generate("test", llama.WithMaxTokens(1))
+			response1, err := ctx1.Generate("test", llama.WithMaxTokens(1), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response1).NotTo(BeEmpty())
 
@@ -1028,7 +1028,7 @@ var _ = Describe("Progress Callbacks", func() {
 			Expect(err).NotTo(HaveOccurred())
 			defer func() { Expect(ctx2.Close()).To(Succeed()) }()
 
-			response2, err := ctx2.Generate("test", llama.WithMaxTokens(1))
+			response2, err := ctx2.Generate("test", llama.WithMaxTokens(1), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response2).NotTo(BeEmpty())
 		})

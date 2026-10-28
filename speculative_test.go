@@ -155,7 +155,7 @@ var _ = Describe("Speculative decoding", Label("speculative"), func() {
 			err := ctx.GenerateStream(prompt, func(string) bool {
 				tokens++
 				return tokens < 3
-			}, llama.WithTemperature(0), llama.WithMaxTokens(40))
+			}, llama.WithTemperature(0), llama.WithMaxTokens(40), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(tokens).To(Equal(3))
 		})
