@@ -480,7 +480,17 @@ static common_params_sampling make_sampling_params(const llama_wrapper_generate_
     // Other parameters
     sampling_params.n_prev = params.n_prev;
     sampling_params.n_probs = params.n_probs;
-    sampling_params.ignore_eos = params.ignore_eos;
+    // As in common, ignoring EOS means never sampling an end-of-generation
+    // token, which needs a vocab with an EOS token to ignore
+    const llama_vocab * vocab = llama_model_get_vocab(model);
+    sampling_params.ignore_eos = params.ignore_eos && llama_vocab_eos(vocab) != LLAMA_TOKEN_NULL;
+    if (sampling_params.ignore_eos) {
+        for (llama_token i = 0; i < llama_vocab_n_tokens(vocab); i++) {
+            if (llama_vocab_is_eog(vocab, i)) {
+                sampling_params.logit_bias.push_back({i, -INFINITY});
+            }
+        }
+    }
 
     apply_chat_session_sampling(sampling_params, model, params.chat_session, params.reasoning_budget);
     return sampling_params;

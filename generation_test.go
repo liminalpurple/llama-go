@@ -787,6 +787,17 @@ var _ = Describe("Generation Edge Cases", func() {
 			Expect(response).NotTo(BeEmpty())
 		})
 
+		It("should generate past the end token with WithIgnoreEOS", Label("integration"), func() {
+			// A finished sentence the model would usually end after
+			var tokens int
+			err := ctx.GenerateStream("The quick brown fox jumps over the lazy dog.", func(string) bool {
+				tokens++
+				return true
+			}, llama.WithTemperature(0), llama.WithMaxTokens(30), llama.WithIgnoreEOS(true))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(tokens).To(Equal(30))
+		})
+
 		It("should stop at max_tokens limit", Label("integration"), func() {
 			response, err := ctx.Generate("Count to 1000:",
 				llama.WithMaxTokens(5),
