@@ -128,6 +128,12 @@ func LoadModel(path string, opts ...ModelOption) (*Model, error) {
 		defer C.free(unsafe.Pointer(cMainGPU))
 	}
 
+	var cMMProj *C.char
+	if config.mmproj != "" {
+		cMMProj = C.CString(config.mmproj)
+		defer C.free(unsafe.Pointer(cMMProj))
+	}
+
 	var cTensorSplit *C.char
 	if config.tensorSplit != "" {
 		cTensorSplit = C.CString(config.tensorSplit)
@@ -135,22 +141,25 @@ func LoadModel(path string, opts ...ModelOption) (*Model, error) {
 	}
 
 	params := C.llama_wrapper_model_params{
-		n_ctx:           0, // Not used for model loading
-		n_batch:         0, // Not used for model loading
-		n_ubatch:        0, // Not used for model loading
-		n_gpu_layers:    C.int(config.gpuLayers),
-		n_threads:       0, // Not used for model loading
-		n_threads_batch: 0, // Not used for model loading
-		n_parallel:      0, // Not used for model loading
-		f16_memory:      false,
-		mlock:           C.bool(config.mlock),
-		mmap:            C.bool(config.mmap),
-		load_mtp:        C.bool(config.mtpHead),
-		embeddings:      false,
-		main_gpu:        cMainGPU,
-		tensor_split:    cTensorSplit,
-		kv_cache_type:   nil,
-		flash_attn:      nil,
+		n_ctx:            0, // Not used for model loading
+		n_batch:          0, // Not used for model loading
+		n_ubatch:         0, // Not used for model loading
+		n_gpu_layers:     C.int(config.gpuLayers),
+		n_threads:        0, // Not used for model loading
+		n_threads_batch:  0, // Not used for model loading
+		n_parallel:       0, // Not used for model loading
+		f16_memory:       false,
+		mlock:            C.bool(config.mlock),
+		mmap:             C.bool(config.mmap),
+		load_mtp:         C.bool(config.mtpHead),
+		mmproj:           cMMProj,
+		image_min_tokens: C.int(config.imageMinTokens),
+		image_max_tokens: C.int(config.imageMaxTokens),
+		embeddings:       false,
+		main_gpu:         cMainGPU,
+		tensor_split:     cTensorSplit,
+		kv_cache_type:    nil,
+		flash_attn:       nil,
 	}
 
 	// Configure progress callback if requested
@@ -476,6 +485,42 @@ func (m *Model) FormatChatPrompt(messages []ChatMessage, opts ChatOptions) (stri
 	defer session.close()
 
 	return session.prompt(), nil
+}
+
+// SupportsVision reports whether the model was loaded with a multimodal
+// projector (WithMMProj) that reads images.
+func (m *Model) SupportsVision() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return !m.closed && bool(C.llama_wrapper_model_supports_vision(m.modelPtr))
+}
+
+// SupportsAudio reports whether the model was loaded with a multimodal
+// projector (WithMMProj) that reads audio.
+func (m *Model) SupportsAudio() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return !m.closed && bool(C.llama_wrapper_model_supports_audio(m.modelPtr))
+}
+
+// MediaMarker returns the text that places a media item in a prompt for this
+// model, or "" without a multimodal projector. It's random for each loaded
+// model, as in llama.cpp's server, so text from users can't place media.
+//
+// Example:
+//
+//	prompt := "Compare " + model.MediaMarker() + " with " + model.MediaMarker()
+//	text, err := ctx.Generate(prompt, llama.WithMedia(first, second))
+func (m *Model) MediaMarker() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.closed {
+		return ""
+	}
+	if marker := C.llama_wrapper_model_media_marker(m.modelPtr); marker != nil {
+		return C.GoString(marker)
+	}
+	return ""
 }
 
 // HasMTPHead reports whether the model file holds a built-in multi-token

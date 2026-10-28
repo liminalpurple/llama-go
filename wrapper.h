@@ -6,6 +6,7 @@ extern "C" {
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 
 // Progress callback type (matches llama.cpp signature)
 typedef bool (*llama_progress_callback_wrapper)(float progress, void* user_data);
@@ -39,6 +40,9 @@ typedef struct {
     const double* spec_synth_rates; // Synthetic acceptance rates, one per drafted token (testing only)
     int n_spec_synth_rates;
     bool load_mtp;         // Load the model's built-in MTP head, if it has one
+    const char* mmproj;    // Multimodal projector to load with the model (NULL = none)
+    int image_min_tokens;  // Image token budget bounds; 0 = from the projector
+    int image_max_tokens;
     const char* main_gpu;   // Main GPU
     const char* tensor_split; // Tensor split
     const char* kv_cache_type; // KV cache quantization: "f16", "q8_0", "q4_0"
@@ -69,6 +73,11 @@ typedef struct {
     bool debug;
     uintptr_t callback_handle; // Handle to Go callback
     bool enable_prefix_caching; // Enable KV cache reuse for matching prefixes
+    // Media items (images or audio, detected from their bytes), placed in the
+    // prompt by the model's media marker
+    const unsigned char* const* media;
+    const size_t* media_sizes;
+    int n_media;
 
     // Basic sampling parameters
     float temperature;
@@ -173,6 +182,12 @@ int llama_wrapper_model_n_embd_out(void* model);
 
 // Whether the model file holds a built-in MTP head
 bool llama_wrapper_model_has_mtp_head(void* model);
+
+// Multimodal projector capabilities, false without a projector
+bool llama_wrapper_model_supports_vision(void* model);
+bool llama_wrapper_model_supports_audio(void* model);
+// The marker that places a media item in a prompt, NULL without a projector
+const char* llama_wrapper_model_media_marker(void* model);
 
 // Chat template support
 const char* llama_wrapper_get_chat_template(void* model);

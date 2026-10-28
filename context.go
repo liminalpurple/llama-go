@@ -613,6 +613,25 @@ func (c *Context) generateWithConfig(prompt string, config generateConfig, callb
 		enable_prefix_caching:       C.bool(c.config.prefixCaching),
 	}
 
+	// Media goes to C as copies, as cgo can't pass Go pointers inside arrays
+	if n := len(config.media); n > 0 {
+		cMedia := (*[1 << 28]*C.uchar)(C.malloc(C.size_t(n) * C.size_t(unsafe.Sizeof((*C.uchar)(nil)))))[:n:n]
+		cSizes := (*[1 << 28]C.size_t)(C.malloc(C.size_t(n) * C.size_t(unsafe.Sizeof(C.size_t(0)))))[:n:n]
+		defer C.free(unsafe.Pointer(&cMedia[0]))
+		defer C.free(unsafe.Pointer(&cSizes[0]))
+		for i, item := range config.media {
+			if len(item) == 0 {
+				return "", fmt.Errorf("media item %d is empty", i)
+			}
+			cMedia[i] = (*C.uchar)(C.CBytes(item))
+			cSizes[i] = C.size_t(len(item))
+			defer C.free(unsafe.Pointer(cMedia[i]))
+		}
+		params.media = &cMedia[0]
+		params.media_sizes = &cSizes[0]
+		params.n_media = C.int(n)
+	}
+
 	// Call C generation function
 	cResult := C.llama_wrapper_generate(c.contextPtr, params)
 	if cResult == nil {
@@ -643,6 +662,9 @@ func (c *Context) generateWithTokensAndConfig(tokens []int32, config generateCon
 
 	if len(tokens) == 0 {
 		return "", fmt.Errorf("no tokens provided")
+	}
+	if len(config.media) > 0 {
+		return "", fmt.Errorf("media input needs a text prompt with media markers, not tokens")
 	}
 
 	// Convert tokens to C array

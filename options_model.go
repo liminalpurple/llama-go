@@ -28,6 +28,37 @@ func WithGPULayers(n int) ModelOption {
 	}
 }
 
+// WithMMProj loads a multimodal projector with the model, so prompts can
+// include images or audio (see ChatMessage.Media and WithMedia). The
+// projector is the mmproj-*.gguf file published beside a vision or audio
+// model, as for llama.cpp's --mmproj.
+//
+// Example:
+//
+//	model, err := llama.LoadModel("model.gguf", llama.WithMMProj("mmproj-model-f16.gguf"))
+func WithMMProj(path string) ModelOption {
+	return func(c *modelConfig) {
+		c.mmproj = path
+	}
+}
+
+// WithImageMinTokens sets the fewest tokens an image is encoded into, as for
+// llama.cpp's --image-min-tokens. Default: the projector's own setting.
+func WithImageMinTokens(n int) ModelOption {
+	return func(c *modelConfig) {
+		c.imageMinTokens = n
+	}
+}
+
+// WithImageMaxTokens sets the most tokens an image is encoded into, as for
+// llama.cpp's --image-max-tokens. Larger images are scaled down to fit.
+// Default: the projector's own setting.
+func WithImageMaxTokens(n int) ModelOption {
+	return func(c *modelConfig) {
+		c.imageMaxTokens = n
+	}
+}
+
 // WithMLock forces the model to stay in RAM using mlock().
 //
 // When enabled, prevents the operating system from swapping model data to disk.

@@ -49,6 +49,7 @@ type generateConfig struct {
 	temperature float32
 	seed        int
 	stopWords   []string
+	media       [][]byte
 	debug       bool
 
 	// Basic sampling parameters
@@ -169,6 +170,9 @@ type modelConfig struct {
 	tensorSplit             string
 	disableProgressCallback bool
 	progressCallback        ProgressCallback
+	mmproj                  string
+	imageMinTokens          int
+	imageMaxTokens          int
 	mtpHead                 bool
 }
 

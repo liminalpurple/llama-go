@@ -20,7 +20,8 @@ import (
 // parses generated output with the parser built from the same render, so
 // reasoning extraction always matches the template that produced the prompt.
 type chatSession struct {
-	ptr unsafe.Pointer
+	ptr   unsafe.Pointer
+	media [][]byte // The messages' media, in prompt order
 }
 
 // newChatSession applies the chat template to messages.
@@ -66,11 +67,31 @@ func newChatSession(m *Model, messages []ChatMessage, opts ChatOptions, format R
 		}
 	}
 
+	// Place each message's media with the model's marker, at the start of the
+	// message unless its content already places them
+	var media [][]byte
+	marker := ""
 	cRoles := make([]*C.char, len(messages))
 	cContents := make([]*C.char, len(messages))
 	for i, msg := range messages {
+		content := msg.Content
+		if len(msg.Media) > 0 {
+			if marker == "" {
+				if marker = m.MediaMarker(); marker == "" {
+					return nil, fmt.Errorf("media input needs the model loaded with a multimodal projector (WithMMProj)")
+				}
+			}
+			switch placed := strings.Count(content, marker); placed {
+			case 0:
+				content = strings.Repeat(marker, len(msg.Media)) + content
+			case len(msg.Media):
+			default:
+				return nil, fmt.Errorf("message %d places %d media items but has %d", i, placed, len(msg.Media))
+			}
+			media = append(media, msg.Media...)
+		}
 		cRoles[i] = C.CString(msg.Role)
-		cContents[i] = C.CString(msg.Content)
+		cContents[i] = C.CString(content)
 	}
 	defer func() {
 		for i := range messages {
@@ -100,7 +121,7 @@ func newChatSession(m *Model, messages []ChatMessage, opts ChatOptions, format R
 		return nil, fmt.Errorf("failed to apply chat template: %s", C.GoString(C.llama_wrapper_last_error()))
 	}
 
-	return &chatSession{ptr: ptr}, nil
+	return &chatSession{ptr: ptr, media: media}, nil
 }
 
 // prompt returns the rendered prompt.
@@ -150,6 +171,9 @@ func chatGenerateOptions(session *chatSession, opts ChatOptions) []GenerateOptio
 	genOpts := []GenerateOption{
 		WithStopWords(opts.StopWords...),
 		withChatSession(session, budget),
+	}
+	if len(session.media) > 0 {
+		genOpts = append(genOpts, WithMedia(session.media...))
 	}
 
 	if opts.MaxTokens != nil {

@@ -134,6 +134,22 @@ func WithStopWords(words ...string) GenerateOption {
 	}
 }
 
+// WithMedia adds images or audio clips to a raw prompt, as encoded files
+// (PNG, JPEG, WAV, MP3, FLAC and others, detected from their bytes). The
+// prompt places each item with the model's MediaMarker, once per item in
+// order. It needs a model loaded with WithMMProj. For chat, use
+// ChatMessage.Media instead.
+//
+// Example:
+//
+//	marker := model.MediaMarker()
+//	text, err := ctx.Generate("Describe this photo: "+marker, llama.WithMedia(photo))
+func WithMedia(media ...[]byte) GenerateOption {
+	return func(c *generateConfig) {
+		c.media = media
+	}
+}
+
 // WithDebug enables verbose logging for generation internals.
 //
 // When enabled, prints detailed information about token sampling, timing,

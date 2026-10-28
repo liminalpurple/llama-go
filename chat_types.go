@@ -15,6 +15,13 @@ package llama
 type ChatMessage struct {
 	Role    string // Message role (e.g., "system", "user", "assistant")
 	Content string // Message content
+
+	// Media holds images or audio clips for the message, as encoded files
+	// (PNG, JPEG, WAV, MP3, FLAC and others, detected from their bytes). It
+	// needs a model loaded with WithMMProj. Each item goes at the start of
+	// the message, unless Content places them with the model's MediaMarker,
+	// once per item in order.
+	Media [][]byte
 }
 
 // ChatResponse represents the complete response from a chat completion.

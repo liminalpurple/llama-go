@@ -6,6 +6,8 @@
 #include "llama.cpp/common/sampling.h"
 #include "llama.cpp/common/speculative.h"
 #include "llama.cpp/common/chat.h"
+#include "llama.cpp/tools/mtmd/mtmd.h"
+#include "llama.cpp/tools/mtmd/mtmd-helper.h"
 // Use angle-bracket form so this resolves via -I paths in both modes:
 // dev (-I./llama.cpp/vendor → submodule) and consumer
 // (-I./cgo_headers/llama.cpp/thirdparty → vendored copy). The vendored copy
@@ -114,6 +116,10 @@ struct llama_wrapper_model_t {
     int n_gpu_layers;  // Number of GPU layers requested (for stats reporting)
     bool has_mtp_head = false;  // The file holds a built-in MTP head
     bool mtp_loaded = false;    // ...and it was loaded alongside the weights
+    // Multimodal projector, if loaded, and its media marker: random, as in the
+    // server, so text from users can't place media
+    mtmd_context* mtmd = nullptr;
+    std::string media_marker;
 };
 
 // Whether a model file holds MTP head tensors. A file can declare a head and
@@ -156,10 +162,92 @@ static bool file_has_mtp_head(const char * path) {
     return false;
 }
 
+// A prompt as the model sees it, as in llama-server's server_tokens: text
+// tokens, with each media chunk taking one LLAMA_TOKEN_NULL entry per token.
+// Media chunks can take a different number of positions than tokens (M-RoPE),
+// so positions are counted separately from indices.
+struct prompt_input {
+    llama_tokens tokens;
+    std::map<size_t, std::shared_ptr<mtmd_input_chunk>> media;  // first index -> chunk
+
+    size_t size() const { return tokens.size(); }
+    bool has_media() const { return !media.empty(); }
+    void clear() { tokens.clear(); media.clear(); }
+
+    // Append a chunk from mtmd_tokenize
+    void add_chunk(const mtmd_input_chunk * chunk) {
+        if (mtmd_input_chunk_get_type(chunk) == MTMD_INPUT_CHUNK_TYPE_TEXT) {
+            size_t n = 0;
+            const llama_token * text = mtmd_input_chunk_get_tokens_text(chunk, &n);
+            tokens.insert(tokens.end(), text, text + n);
+            return;
+        }
+        media[tokens.size()] = std::shared_ptr<mtmd_input_chunk>(mtmd_input_chunk_copy(chunk), mtmd_input_chunk_free);
+        tokens.resize(tokens.size() + mtmd_input_chunk_get_n_tokens(chunk), LLAMA_TOKEN_NULL);
+    }
+
+    // The media chunk covering index i and where it starts, or nullptr
+    const mtmd_input_chunk * chunk_at(size_t i, size_t & start) const {
+        auto it = media.upper_bound(i);
+        if (it == media.begin()) {
+            return nullptr;
+        }
+        --it;
+        if (i >= it->first + mtmd_input_chunk_get_n_tokens(it->second.get())) {
+            return nullptr;
+        }
+        start = it->first;
+        return it->second.get();
+    }
+
+    // Index i, moved back to the start of the media chunk it falls inside
+    size_t boundary(size_t i) const {
+        size_t start = 0;
+        return chunk_at(i, start) ? start : i;
+    }
+
+    // Position of index i, which must be on a chunk boundary
+    llama_pos pos_at(size_t i) const {
+        llama_pos pos = (llama_pos)i;
+        for (const auto & [start, chunk] : media) {
+            if (start >= i) {
+                break;
+            }
+            pos += mtmd_input_chunk_get_n_pos(chunk.get()) - (llama_pos)mtmd_input_chunk_get_n_tokens(chunk.get());
+        }
+        return pos;
+    }
+
+    // Length of the prefix shared with another prompt, matching media chunks
+    // by id (a hash of the media's bytes) as the server does
+    size_t common_prefix(const prompt_input & other) const {
+        const size_t n = std::min(size(), other.size());
+        for (size_t i = 0; i < n; i++) {
+            if (tokens[i] == LLAMA_TOKEN_NULL && other.tokens[i] == LLAMA_TOKEN_NULL) {
+                size_t start_a = 0, start_b = 0;
+                const mtmd_input_chunk * a = chunk_at(i, start_a);
+                const mtmd_input_chunk * b = other.chunk_at(i, start_b);
+                if (!a || !b || start_a != i || start_b != i ||
+                    std::string(mtmd_input_chunk_get_id(a)) != mtmd_input_chunk_get_id(b) ||
+                    mtmd_input_chunk_get_n_tokens(a) != mtmd_input_chunk_get_n_tokens(b)) {
+                    return i;
+                }
+                i += mtmd_input_chunk_get_n_tokens(a) - 1;
+                continue;
+            }
+            if (tokens[i] != other.tokens[i]) {
+                return i;
+            }
+        }
+        return n;
+    }
+};
+
 struct llama_wrapper_context_t {
     llama_context* ctx;
     llama_model* model;  // Reference to parent model
-    std::vector<int> cached_tokens;  // Prompt tokens currently held in memory for sequence 0
+    prompt_input cached;  // Prompt currently held in memory for sequence 0
+    mtmd_context* mtmd = nullptr;  // The model's multimodal projector, if loaded
     // Recurrent, hybrid and sliding-window memory can't be trimmed to an
     // arbitrary position, so reuse restores a checkpoint saved before the last
     // prompt token instead
@@ -326,6 +414,31 @@ void* llama_wrapper_model_load(const char* model_path, llama_wrapper_model_param
         wrapper->has_mtp_head = llama_model_n_layer_nextn(model) > 0 && file_has_mtp_head(model_path);
         wrapper->mtp_loaded = params.load_mtp && wrapper->has_mtp_head;
 
+        if (params.mmproj && params.mmproj[0] != '\0') {
+            std::random_device rd;
+            char marker[64];
+            snprintf(marker, sizeof(marker), "<__media_%08x%08x__>", rd(), rd());
+            wrapper->media_marker = marker;
+
+            mtmd_context_params mparams = mtmd_context_params_default();
+            mparams.use_gpu = params.n_gpu_layers != 0;
+            mparams.print_timings = false;
+            mparams.media_marker = wrapper->media_marker.c_str();
+            if (params.image_min_tokens > 0) {
+                mparams.image_min_tokens = params.image_min_tokens;
+            }
+            if (params.image_max_tokens > 0) {
+                mparams.image_max_tokens = params.image_max_tokens;
+            }
+            wrapper->mtmd = mtmd_init_from_file(params.mmproj, model, mparams);
+            if (!wrapper->mtmd) {
+                llama_model_free(model);
+                delete wrapper;
+                g_last_error = "Failed to load multimodal projector from: " + std::string(params.mmproj);
+                return nullptr;
+            }
+        }
+
         return wrapper;
     } catch (const std::exception& e) {
         g_last_error = "Exception loading model: " + std::string(e.what());
@@ -337,6 +450,10 @@ void llama_wrapper_model_free(void* model) {
     if (!model) return;
 
     auto wrapper = static_cast<llama_wrapper_model_t*>(model);
+    if (wrapper->mtmd) {
+        mtmd_free(wrapper->mtmd);
+        wrapper->mtmd = nullptr;
+    }
     if (wrapper->model) {
         llama_model_free(wrapper->model);
         wrapper->model = nullptr;  // Prevent double-free
@@ -417,6 +534,7 @@ void* llama_wrapper_context_create(void* model, llama_wrapper_model_params param
             g_last_error = "Failed to create context";
             return nullptr;
         }
+        ctx_wrapper->mtmd = model_wrapper->mtmd;
 
         if (speculate) {
             ctx_wrapper->n_draft = std::min(n_draft, (int)llama_n_batch(ctx_wrapper->ctx) - 1);
@@ -506,21 +624,23 @@ int llama_wrapper_dry_max_seq_breakers(void) {
     return LLAMA_DRY_MAX_SEQ_BREAKERS;
 }
 
-bool llama_wrapper_model_has_mtp_head(void* model) {
-    return model && static_cast<llama_wrapper_model_t*>(model)->has_mtp_head;
+bool llama_wrapper_model_supports_vision(void* model) {
+    auto wrapper = static_cast<llama_wrapper_model_t*>(model);
+    return wrapper && wrapper->mtmd && mtmd_support_vision(wrapper->mtmd);
 }
 
-// Helper function to find common prefix length between two token vectors
-static int findCommonPrefix(const std::vector<int>& a, const std::vector<int>& b) {
-    int commonLen = 0;
-    size_t minLen = std::min(a.size(), b.size());
-    for (size_t i = 0; i < minLen; i++) {
-        if (a[i] != b[i]) {
-            break;
-        }
-        commonLen++;
-    }
-    return commonLen;
+bool llama_wrapper_model_supports_audio(void* model) {
+    auto wrapper = static_cast<llama_wrapper_model_t*>(model);
+    return wrapper && wrapper->mtmd && mtmd_support_audio(wrapper->mtmd);
+}
+
+const char* llama_wrapper_model_media_marker(void* model) {
+    auto wrapper = static_cast<llama_wrapper_model_t*>(model);
+    return wrapper && wrapper->mtmd ? wrapper->media_marker.c_str() : nullptr;
+}
+
+bool llama_wrapper_model_has_mtp_head(void* model) {
+    return model && static_cast<llama_wrapper_model_t*>(model)->has_mtp_head;
 }
 
 // Build sampling parameters for a generation request
@@ -616,17 +736,18 @@ static llama_tokens sample_and_accept_synth(common_sampler * smpl, llama_context
 // Decodes one batch of at most n_batch entries into a context
 using decode_fn = std::function<bool(common_batch &)>;
 
-// Restore a context's memory to resume a prompt of n_tokens after at most
-// limit tokens, always leaving the last prompt token to decode so its logits
-// are fresh. Memory that can't be trimmed resumes from the checkpoint saved
-// before the last prompt token, or from the start. Returns where decoding
-// resumes, or -1 with g_last_error set.
-static int restore_prompt(llama_wrapper_context_t * w, int n_tokens, int limit) {
-    // Memory no longer matches cached_tokens until the new prompt is decoded
-    w->cached_tokens.clear();
+// Restore a context's memory to resume a prompt after at most limit entries,
+// always leaving the last entry to decode so its logits are fresh, and never
+// resuming inside a media chunk. Memory that can't be trimmed resumes from the
+// checkpoint saved before the last prompt token, or from the start. Returns
+// the index decoding resumes from, or -1 with g_last_error set.
+static int restore_prompt(llama_wrapper_context_t * w, const prompt_input & prompt, int limit) {
+    // Memory no longer matches the cached prompt until the new one is decoded
+    w->cached.clear();
 
+    const int n_tokens = (int)prompt.size();
     llama_memory_t mem = llama_get_memory(w->ctx);
-    int resume_from = std::min(limit, n_tokens - 1);
+    int resume_from = (int)prompt.boundary(std::min(limit, n_tokens - 1));
     if (w->needs_checkpoint) {
         const auto & ckpt = w->checkpoint;
         if (!ckpt.empty() && ckpt.n_tokens <= resume_from &&
@@ -643,7 +764,7 @@ static int restore_prompt(llama_wrapper_context_t * w, int n_tokens, int limit) 
             g_last_error = "Failed to clear memory";
             return -1;
         }
-    } else if (!w->needs_checkpoint && !llama_memory_seq_rm(mem, 0, resume_from, -1)) {
+    } else if (!w->needs_checkpoint && !llama_memory_seq_rm(mem, 0, prompt.pos_at(resume_from), -1)) {
         g_last_error = "Failed to trim memory to the cached prefix";
         return -1;
     }
@@ -651,9 +772,10 @@ static int restore_prompt(llama_wrapper_context_t * w, int n_tokens, int limit) 
 }
 
 // Save the prompt checkpoint before the last prompt token, for memory that
-// can't be trimmed back to it
-static void save_prompt_checkpoint(llama_wrapper_context_t * w, int n_tokens) {
-    if (!w->needs_checkpoint || n_tokens < 2 ||
+// can't be trimmed back to it. A prompt ending in media has no such point.
+static void save_prompt_checkpoint(llama_wrapper_context_t * w, const prompt_input & prompt) {
+    const int n_tokens = (int)prompt.size();
+    if (!w->needs_checkpoint || n_tokens < 2 || prompt.tokens.back() == LLAMA_TOKEN_NULL ||
         (!w->checkpoint.empty() && w->checkpoint.n_tokens == n_tokens - 1)) {
         return;
     }
@@ -700,23 +822,20 @@ static bool roll_back_step(llama_wrapper_context_t * w, llama_pos n_past, const 
     return decode(batch);
 }
 
-char* llama_wrapper_generate_with_tokens(void* ctx, const int* tokens, int n_tokens, int prefix_len, llama_wrapper_generate_params params) {
-    if (!ctx || !tokens) {
-        g_last_error = "Context and tokens cannot be null";
-        return nullptr;
-    }
-
-    auto wrapper = static_cast<llama_wrapper_context_t*>(ctx);
-    if (!wrapper->ctx) {
-        g_last_error = "Context has been freed";
-        return nullptr;
-    }
-
+// Generate from a prompt, reusing the first prefix_len entries of what the
+// context's memory holds
+static char* generate_prompt(llama_wrapper_context_t* wrapper, const prompt_input & prompt, int prefix_len,
+                             llama_wrapper_generate_params params) {
     try {
-        std::vector<llama_token> prompt_tokens(tokens, tokens + n_tokens);
+        const std::vector<llama_token> & prompt_tokens = prompt.tokens;
+        const int n_tokens = (int)prompt.size();
 
         if (prompt_tokens.empty()) {
             g_last_error = "Token array is empty";
+            return nullptr;
+        }
+        if (prompt.has_media() && wrapper->spec) {
+            g_last_error = "Speculative decoding doesn't support media input yet";
             return nullptr;
         }
 
@@ -767,59 +886,94 @@ char* llama_wrapper_generate_with_tokens(void* ctx, const int* tokens, int n_tok
         // Both contexts resume the prompt from the same position, the furthest
         // one they can both restore
         const bool cache = params.enable_prefix_caching;
-        int resume_from = restore_prompt(wrapper, n_tokens, prefix_len);
+        int resume_from = restore_prompt(wrapper, prompt, prefix_len);
         while (draft && resume_from >= 0) {
-            const std::vector<int> prompt_ints(prompt_tokens.begin(), prompt_tokens.end());
-            const int draft_limit = std::min(resume_from, cache ? findCommonPrefix(draft->cached_tokens, prompt_ints) : 0);
-            const int draft_from = restore_prompt(draft, n_tokens, draft_limit);
+            const int draft_limit = std::min(resume_from, cache ? (int)draft->cached.common_prefix(prompt) : 0);
+            const int draft_from = restore_prompt(draft, prompt, draft_limit);
             if (draft_from < 0 || draft_from == resume_from) {
                 resume_from = draft_from;
                 break;
             }
-            resume_from = restore_prompt(wrapper, n_tokens, draft_from);
+            resume_from = restore_prompt(wrapper, prompt, draft_from);
         }
         if (resume_from < 0) {
             return nullptr;
         }
 
-        // Decode prompt tokens [from, to) in n_batch chunks with explicit positions
+        // Decode prompt entries [from, to): text in n_batch chunks with
+        // explicit positions, media chunks through mtmd, which encodes them and
+        // decodes their embeddings
         const int n_batch = (int)llama_n_batch(wrapper->ctx);
         auto decode_prompt = [&](int from, int to, bool output_last) {
-            for (int start = from; start < to; start += n_batch) {
-                const int end = std::min(to, start + n_batch);
-                common_batch batch(wrapper->ctx);
-                for (int pos = start; pos < end; pos++) {
-                    batch.add(prompt_tokens[pos], pos, 0, output_last && pos == to - 1);
+            int i = from;
+            while (i < to) {
+                size_t start = 0;
+                if (const mtmd_input_chunk * chunk = prompt.chunk_at(i, start)) {
+                    const int end = i + (int)mtmd_input_chunk_get_n_tokens(chunk);
+                    // a model with non-causal attention on media needs the
+                    // whole chunk in one micro-batch
+                    if (mtmd_decode_use_non_causal(wrapper->mtmd, chunk) &&
+                        (int)mtmd_input_chunk_get_n_tokens(chunk) > (int)llama_n_ubatch(wrapper->ctx)) {
+                        g_last_error = "Media needs " + std::to_string(mtmd_input_chunk_get_n_tokens(chunk)) +
+                                       " tokens in one micro-batch, more than the context's " +
+                                       std::to_string(llama_n_ubatch(wrapper->ctx)) + "; increase WithUBatch";
+                        return false;
+                    }
+                    llama_pos new_pos = 0;
+                    if (mtmd_helper_eval_chunk_single(wrapper->mtmd, wrapper->ctx, chunk, prompt.pos_at(i), 0, n_batch,
+                                                      output_last && end >= to, &new_pos) != 0) {
+                        g_last_error = "Failed to decode media";
+                        return false;
+                    }
+                    i = end;
+                    continue;
                 }
-                if (!decode_both(batch)) {
-                    return false;
+                auto next = prompt.media.lower_bound(i);
+                const int run_end = next == prompt.media.end() ? to : std::min(to, (int)next->first);
+                const llama_pos pos0 = prompt.pos_at(i);
+                for (int run = i; run < run_end; run += n_batch) {
+                    const int end = std::min(run_end, run + n_batch);
+                    common_batch batch(wrapper->ctx);
+                    for (int k = run; k < end; k++) {
+                        batch.add(prompt_tokens[k], pos0 + (k - i), 0, output_last && k == to - 1);
+                    }
+                    if (!decode_both(batch)) {
+                        g_last_error = "Failed to decode prompt";
+                        return false;
+                    }
                 }
+                i = run_end;
             }
             return true;
         };
 
         // Decode up to the last prompt token, checkpoint there if the memory
-        // can't be trimmed, then decode the last token for its logits
-        bool prompt_ok = decode_prompt(resume_from, n_tokens - 1, false);
-        if (prompt_ok && cache) {
-            save_prompt_checkpoint(wrapper, n_tokens);
-            if (draft) {
-                save_prompt_checkpoint(draft, n_tokens);
+        // can't be trimmed, then decode the last token for its logits. A
+        // prompt ending in media decodes it whole, logits and all.
+        bool prompt_ok;
+        if (prompt_tokens.back() == LLAMA_TOKEN_NULL) {
+            prompt_ok = decode_prompt(resume_from, n_tokens, true);
+        } else {
+            prompt_ok = decode_prompt(resume_from, n_tokens - 1, false);
+            if (prompt_ok && cache) {
+                save_prompt_checkpoint(wrapper, prompt);
+                if (draft) {
+                    save_prompt_checkpoint(draft, prompt);
+                }
             }
+            prompt_ok = prompt_ok && decode_prompt(n_tokens - 1, n_tokens, true);
         }
-        prompt_ok = prompt_ok && decode_prompt(n_tokens - 1, n_tokens, true);
         if (!prompt_ok) {
             wrapper->checkpoint.clear();
             if (draft) {
                 draft->checkpoint.clear();
             }
-            g_last_error = "Failed to decode prompt";
             return nullptr;
         }
         if (cache) {
-            wrapper->cached_tokens.assign(prompt_tokens.begin(), prompt_tokens.end());
+            wrapper->cached = prompt;
             if (draft) {
-                draft->cached_tokens = wrapper->cached_tokens;
+                draft->cached = prompt;
             }
         }
 
@@ -854,7 +1008,7 @@ char* llama_wrapper_generate_with_tokens(void* ctx, const int* tokens, int n_tok
 
         // id is the latest sampled token: emitted, but not yet decoded at n_past
         llama_tokens history(prompt_tokens);
-        llama_pos n_past = n_tokens;
+        llama_pos n_past = prompt.pos_at(n_tokens);
         llama_token id = common_sampler_sample(sampler.get(), wrapper->ctx, -1);
         common_sampler_accept(sampler.get(), id, true);
         if (spec) {
@@ -969,6 +1123,88 @@ char* llama_wrapper_generate_with_tokens(void* ctx, const int* tokens, int n_tok
     }
 }
 
+char* llama_wrapper_generate_with_tokens(void* ctx, const int* tokens, int n_tokens, int prefix_len, llama_wrapper_generate_params params) {
+    if (!ctx || !tokens) {
+        g_last_error = "Context and tokens cannot be null";
+        return nullptr;
+    }
+
+    auto wrapper = static_cast<llama_wrapper_context_t*>(ctx);
+    if (!wrapper->ctx) {
+        g_last_error = "Context has been freed";
+        return nullptr;
+    }
+
+    prompt_input prompt;
+    prompt.tokens.assign(tokens, tokens + n_tokens);
+    return generate_prompt(wrapper, prompt, prefix_len, params);
+}
+
+// Tokenise a text prompt, with any media in it through mtmd, into a prompt
+// input. Returns false with g_last_error set.
+static bool tokenize_prompt(llama_wrapper_context_t * wrapper, const llama_wrapper_generate_params & params,
+                            prompt_input & prompt) {
+    if (params.n_media == 0) {
+        prompt.tokens = common_tokenize(wrapper->ctx, params.prompt, true, true);
+        return true;
+    }
+    if (!wrapper->mtmd) {
+        g_last_error = "Media input needs the model loaded with a multimodal projector (WithMMProj)";
+        return false;
+    }
+
+    // mtmd reports a marker count mismatch as a general failure, so check it
+    // first for a clear error
+    const std::string marker = mtmd_get_marker(wrapper->mtmd);
+    int n_markers = 0;
+    for (const char * at = strstr(params.prompt, marker.c_str()); at; at = strstr(at + marker.size(), marker.c_str())) {
+        n_markers++;
+    }
+    if (n_markers != params.n_media) {
+        g_last_error = "The prompt's media markers (" + std::to_string(n_markers) +
+                       ") don't match the number of media items (" + std::to_string(params.n_media) + ")";
+        return false;
+    }
+
+    // mtmd decodes images and audio itself, and ids each item by a hash of
+    // its bytes, which prefix caching compares
+    std::vector<mtmd::bitmap_ptr> bitmaps;
+    std::vector<const mtmd_bitmap *> bitmap_ptrs;
+    std::vector<mtmd_helper_video *> videos;
+    auto free_videos = [&]() {
+        for (auto * video : videos) {
+            mtmd_helper_video_free(video);
+        }
+    };
+    for (int i = 0; i < params.n_media; i++) {
+        const auto out = mtmd_helper_bitmap_init_from_buf(wrapper->mtmd, params.media[i], params.media_sizes[i], false,
+                                                          mtmd_helper_init_opt_default());
+        if (out.video_ctx) {
+            videos.push_back(out.video_ctx);
+        }
+        if (!out.bitmap) {
+            free_videos();
+            g_last_error = "Failed to load media item " + std::to_string(i) + ": not a supported image or audio format";
+            return false;
+        }
+        bitmaps.emplace_back(out.bitmap);
+        bitmap_ptrs.push_back(out.bitmap);
+    }
+
+    const mtmd_input_text text = { params.prompt, strlen(params.prompt), /*add_special*/ true, /*parse_special*/ true };
+    mtmd::input_chunks_ptr chunks(mtmd_input_chunks_init());
+    const int32_t res = mtmd_tokenize(wrapper->mtmd, chunks.get(), &text, bitmap_ptrs.data(), bitmap_ptrs.size());
+    free_videos();
+    if (res != 0) {
+        g_last_error = "Failed to process media";
+        return false;
+    }
+    for (size_t i = 0; i < mtmd_input_chunks_size(chunks.get()); i++) {
+        prompt.add_chunk(mtmd_input_chunks_get(chunks.get(), i));
+    }
+    return true;
+}
+
 // Simple wrapper that tokenises the prompt and handles prefix caching automatically
 char* llama_wrapper_generate(void* ctx, llama_wrapper_generate_params params) {
     if (!ctx) {
@@ -983,24 +1219,19 @@ char* llama_wrapper_generate(void* ctx, llama_wrapper_generate_params params) {
     }
 
     try {
-        // Tokenise the prompt
-        std::vector<llama_token> prompt_tokens = common_tokenize(wrapper->ctx, params.prompt, true, true);
-
-        if (prompt_tokens.empty()) {
+        prompt_input prompt;
+        if (!tokenize_prompt(wrapper, params, prompt)) {
+            return nullptr;
+        }
+        if (prompt.tokens.empty()) {
             g_last_error = "Failed to tokenize prompt";
             return nullptr;
         }
 
-        // Convert to int vector for comparison
-        std::vector<int> tokens_int(prompt_tokens.begin(), prompt_tokens.end());
-
-        // Find common prefix with cached tokens (only if prefix caching enabled).
-        // generate_with_tokens records the new prompt once it has decoded.
-        int prefix_len = params.enable_prefix_caching
-            ? findCommonPrefix(wrapper->cached_tokens, tokens_int)
-            : 0;
-
-        return llama_wrapper_generate_with_tokens(ctx, tokens_int.data(), tokens_int.size(), prefix_len, params);
+        // Find the prefix shared with the cached prompt (only if prefix caching
+        // enabled); generate_prompt records the new prompt once it has decoded
+        const int prefix_len = params.enable_prefix_caching ? (int)wrapper->cached.common_prefix(prompt) : 0;
+        return generate_prompt(wrapper, prompt, prefix_len, params);
 
     } catch (const std::exception& e) {
         g_last_error = "Exception during generation: " + std::string(e.what());
@@ -1277,7 +1508,7 @@ int llama_wrapper_get_cached_token_count(void* ctx) {
     }
 
     auto wrapper = static_cast<llama_wrapper_context_t*>(ctx);
-    return static_cast<int>(wrapper->cached_tokens.size());
+    return static_cast<int>(wrapper->cached.size());
 }
 
 // Get the chat template from model metadata

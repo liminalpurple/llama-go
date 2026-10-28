@@ -135,6 +135,40 @@ for {
 }
 ```
 
+### Images and audio
+
+Vision and audio models ship a multimodal projector (`mmproj-*.gguf`) beside the model file. Load
+it with the model, then attach images or audio clips to chat messages as encoded files: PNG, JPEG,
+WAV, MP3, FLAC and others are detected from their bytes.
+
+```go
+model, _ := llama.LoadModel("Qwen3.5-0.8B-Q8_0.gguf", llama.WithMMProj("mmproj-F16.gguf"))
+defer model.Close()
+
+ctx, _ := model.NewContext(llama.WithContext(4096))
+defer ctx.Close()
+
+photo, _ := os.ReadFile("photo.jpg")
+response, _ := ctx.Chat(context.Background(), []llama.ChatMessage{
+    {Role: "user", Content: "What's in this photo?", Media: [][]byte{photo}},
+}, llama.ChatOptions{})
+```
+
+Media goes at the start of its message, in order. To place it elsewhere, put the model's
+`MediaMarker()` in the content once per item. The marker is random for each loaded model, as in
+llama.cpp's server, so text from users can't place media. For raw prompts, use the marker with
+`WithMedia`:
+
+```go
+prompt := "Compare " + model.MediaMarker() + " with " + model.MediaMarker()
+text, _ := ctx.Generate(prompt, llama.WithMedia(first, second))
+```
+
+`SupportsVision()` and `SupportsAudio()` report what the projector reads. Prefix caching works
+through media: a prompt that repeats an earlier image reuses it rather than encoding it again, as
+media items are recognised by a hash of their bytes. `WithImageMaxTokens` caps how many tokens an
+image becomes, trading detail for speed. Speculative decoding doesn't support media input yet.
+
 ### Embeddings
 
 Generate vector representations for semantic search and similarity:
@@ -241,7 +275,8 @@ when finished, close model when done with weights.
 Options use the functional options pattern, separated into ModelOption and ContextOption.
 
 **Model options** (affect weight loading): `WithGPULayers`, `WithMLock`, `WithMMap`,
-`WithMainGPU`, `WithTensorSplit`, `WithSilentLoading`, `WithProgressCallback`, `WithMTPHead`
+`WithMainGPU`, `WithTensorSplit`, `WithSilentLoading`, `WithProgressCallback`, `WithMTPHead`,
+`WithMMProj`, `WithImageMinTokens`, `WithImageMaxTokens`
 
 **Context options** (affect execution): `WithContext`, `WithBatch`, `WithUBatch`, `WithThreads`,
 `WithThreadsBatch`, `WithF16Memory`, `WithEmbeddings`, `WithKVCacheType`, `WithFlashAttn`,
