@@ -351,10 +351,12 @@ void* llama_wrapper_context_create(void* model, llama_wrapper_model_params param
                 throw std::runtime_error("batch size is too small for speculative decoding");
             }
 
-            // The draft context follows the target's settings, as in common
+            // The draft context follows the target's settings, as in common,
+            // and is linked to the target for drafters that read its memory
             auto draft_params = ctx_params;
             draft_params.n_ctx = llama_n_ctx(ctx_wrapper->ctx);
             draft_params.n_rs_seq = 0;
+            draft_params.ctx_other = ctx_wrapper->ctx;
             auto draft_model = static_cast<llama_wrapper_model_t*>(params.draft_model);
             ctx_wrapper->draft = create_context(draft_model->model, draft_params);
             if (!ctx_wrapper->draft) {
