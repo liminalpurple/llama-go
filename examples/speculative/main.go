@@ -1,7 +1,8 @@
 // Speculative example demonstrates speculative decoding for faster generation.
 //
-// The target model speculates either with a smaller draft model, or with its
-// own built-in multi-token prediction (MTP) head. The drafter proposes several
+// The target model speculates with a smaller draft model, its own built-in
+// multi-token prediction (MTP) head, or an MTP head in a separate file, as
+// Gemma 4 ships. The drafter proposes several
 // tokens at a time, which the target model verifies in one pass, so output
 // arrives sooner when the drafter predicts well. Pass -draft "" without -mtp
 // to generate without speculation, for comparison.
@@ -10,6 +11,7 @@
 //
 //	speculative -target large-model.gguf -draft small-model.gguf -p "prompt"
 //	speculative -target mtp-model.gguf -mtp -p "prompt"
+//	speculative -target gemma-4.gguf -mtp-head mtp-gemma-4.gguf -p "prompt"
 //	speculative -target mtp-model.gguf -draft "" -p "prompt"
 //
 // Speculative decoding works best when:
@@ -35,6 +37,7 @@ func main() {
 		targetModel = flag.String("target", "./Qwen3-0.6B-Q8_0.gguf", "path to target (main) model")
 		draftModel  = flag.String("draft", "./Qwen3-0.6B-Q8_0.gguf", "path to draft model, or empty for none")
 		mtp         = flag.Bool("mtp", false, "speculate with the target's built-in MTP head instead of a draft model")
+		mtpHead     = flag.String("mtp-head", "", "path to a separate MTP head file to speculate with")
 		prompt      = flag.String("p", "The capital of France is", "prompt for generation")
 		maxTokens   = flag.Int("n", 100, "maximum number of tokens to generate")
 		context     = flag.Int("c", 2048, "context size")
@@ -69,6 +72,21 @@ func main() {
 		llama.WithDraftTokens(*draftTokens),
 	}
 	switch {
+	case *mtpHead != "":
+		// The head must stay open while the context uses it
+		fmt.Printf("Loading MTP head: %s\n", *mtpHead)
+		head, err := llama.LoadModel(*mtpHead, llama.WithGPULayers(*gpuLayers), llama.WithMMap(true))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error loading MTP head: %v\n", err)
+			os.Exit(1)
+		}
+		defer func() {
+			if err := head.Close(); err != nil {
+				fmt.Fprintf(os.Stderr, "Error closing MTP head: %v\n", err)
+			}
+		}()
+		fmt.Printf("Speculating with the MTP head, up to %d tokens per step\n", *draftTokens)
+		ctxOpts = append(ctxOpts, llama.WithMTPModel(head))
 	case *mtp:
 		fmt.Printf("Speculating with the target's MTP head, up to %d tokens per step\n", *draftTokens)
 		ctxOpts = append(ctxOpts, llama.WithMTP())

@@ -385,11 +385,9 @@ void* llama_wrapper_context_create(void* model, llama_wrapper_model_params param
             g_last_error = "Speculative decoding needs a single-sequence generation context";
             return nullptr;
         }
-        if (params.draft_model && params.mtp) {
-            g_last_error = "Use either a draft model or the model's MTP head, not both";
-            return nullptr;
-        }
-        if (params.mtp && !model_wrapper->mtp_loaded) {
+        // With a draft model, MTP runs that model as a separate head, as for
+        // Gemma 4; without one, it runs the head built into this model
+        if (params.mtp && !params.draft_model && !model_wrapper->mtp_loaded) {
             g_last_error = model_wrapper->has_mtp_head
                 ? "Load the model with its MTP head to speculate with it"
                 : "Model has no MTP head";
@@ -424,17 +422,17 @@ void* llama_wrapper_context_create(void* model, llama_wrapper_model_params param
 
             // The draft context follows the target's settings, as in common,
             // and is linked to the target for drafters that read its memory.
-            // An MTP draft context runs the head on the target's own weights.
+            // A built-in MTP head runs on the target's own weights.
             auto draft_params = ctx_params;
             draft_params.n_ctx = llama_n_ctx(ctx_wrapper->ctx);
             draft_params.n_rs_seq = 0;
             draft_params.ctx_other = ctx_wrapper->ctx;
-            llama_model* draft_model = model_wrapper->model;
             if (params.mtp) {
                 draft_params.ctx_type = LLAMA_CONTEXT_TYPE_MTP;
-            } else {
-                draft_model = static_cast<llama_wrapper_model_t*>(params.draft_model)->model;
             }
+            llama_model* draft_model = params.draft_model
+                ? static_cast<llama_wrapper_model_t*>(params.draft_model)->model
+                : model_wrapper->model;
             ctx_wrapper->draft = create_context(draft_model, draft_params);
             if (!ctx_wrapper->draft) {
                 throw std::runtime_error("failed to create draft context");

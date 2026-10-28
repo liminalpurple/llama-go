@@ -267,6 +267,22 @@ func (m *Model) NewContext(opts ...ContextOption) (*Context, error) {
 		config.batchSize = config.contextSize
 	}
 
+	drafters := 0
+	for _, set := range []bool{config.draftModel != nil, config.mtp, config.mtpModel != nil} {
+		if set {
+			drafters++
+		}
+	}
+	if drafters > 1 {
+		return nil, fmt.Errorf("use only one of WithDraft, WithMTP and WithMTPModel")
+	}
+
+	// A separate MTP head runs as the draft model, in an MTP context
+	if config.mtpModel != nil {
+		config.draftModel = config.mtpModel
+		config.mtp = true
+	}
+
 	// The draft model is held open by the caller; check it now so a closed
 	// one fails here rather than inside llama.cpp
 	var draftPtr unsafe.Pointer

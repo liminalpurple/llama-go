@@ -3,6 +3,7 @@ package llama_test
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -221,17 +222,83 @@ var _ = Describe("Speculative decoding", Label("speculative"), func() {
 	})
 })
 
-// TEST_MTP_MODEL names a model with a built-in MTP head. Like self-speculation
-// on Qwen3.5, MTP output can differ from plain generation at near-ties, as
-// verifying several tokens per batch picks between them differently, so these
-// tests check MTP against itself.
-var _ = Describe("MTP speculative decoding", Label("speculative", "mtp"), func() {
+// MTP output can differ from plain generation at near-ties, as on Qwen3.5
+// with self-speculation: verifying several tokens per batch picks between
+// them differently. So these tests check MTP against itself.
+func describeMTPGeneration(newContext func(opts ...llama.ContextOption) *llama.Context) {
 	const prompt = "The capital of France is Paris. The capital of Germany is"
 
-	var (
-		model *llama.Model
-		ctx   *llama.Context
-	)
+	Context("generating", func() {
+		var ctx *llama.Context
+
+		AfterEach(func() {
+			if ctx != nil {
+				Expect(ctx.Close()).To(Succeed())
+				ctx = nil
+			}
+		})
+
+		It("should give the same output for the same seed", Label("integration"), func() {
+			ctx = newContext()
+			first, err := ctx.Generate(prompt, llama.WithSeed(12345), llama.WithMaxTokens(40), llama.WithIgnoreEOS(true))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(first).NotTo(BeEmpty())
+			second, err := ctx.Generate(prompt, llama.WithSeed(12345), llama.WithMaxTokens(40), llama.WithIgnoreEOS(true))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(second).To(Equal(first))
+		})
+
+		It("should match a fresh context after reusing the cache", Label("integration"), func() {
+			ctx = newContext()
+			_, err := ctx.Generate(prompt+" Berlin. The capital of Italy is",
+				llama.WithTemperature(0), llama.WithMaxTokens(20))
+			Expect(err).NotTo(HaveOccurred())
+			reused, err := ctx.Generate(prompt, llama.WithTemperature(0), llama.WithMaxTokens(40))
+			Expect(err).NotTo(HaveOccurred())
+
+			fresh := newContext()
+			defer func() { Expect(fresh.Close()).To(Succeed()) }()
+			expected, err := fresh.Generate(prompt, llama.WithTemperature(0), llama.WithMaxTokens(40))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(reused).To(Equal(expected))
+		})
+
+		It("should stop after max tokens", Label("integration"), func() {
+			ctx = newContext(llama.WithDraftTokens(2))
+			var tokens int
+			err := ctx.GenerateStream("Count from one to one hundred: one, two, three,", func(string) bool {
+				tokens++
+				return true
+			}, llama.WithTemperature(0), llama.WithMaxTokens(7), llama.WithIgnoreEOS(true))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(tokens).To(Equal(7))
+		})
+
+		It("should stop when the callback returns false", Label("integration"), func() {
+			ctx = newContext()
+			var tokens int
+			err := ctx.GenerateStream(prompt, func(string) bool {
+				tokens++
+				return tokens < 3
+			}, llama.WithTemperature(0), llama.WithMaxTokens(40), llama.WithIgnoreEOS(true))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(tokens).To(Equal(3))
+		})
+
+		It("should speculate in chat", Label("integration", "chat"), func() {
+			ctx = newContext()
+			response, err := ctx.Chat(context.Background(),
+				[]llama.ChatMessage{{Role: "user", Content: "Name three primary colours."}},
+				llama.ChatOptions{MaxTokens: llama.Int(40), Temperature: llama.Float32(0), EnableThinking: llama.Bool(false)})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(response.Content).NotTo(BeEmpty())
+		})
+	})
+}
+
+// TEST_MTP_MODEL names a model with a built-in MTP head
+var _ = Describe("MTP with a built-in head", Label("speculative", "mtp"), func() {
+	var model *llama.Model
 
 	BeforeEach(func() {
 		modelPath := os.Getenv("TEST_MTP_MODEL")
@@ -246,23 +313,11 @@ var _ = Describe("MTP speculative decoding", Label("speculative", "mtp"), func()
 	})
 
 	AfterEach(func() {
-		if ctx != nil {
-			Expect(ctx.Close()).To(Succeed())
-			ctx = nil
-		}
 		if model != nil {
 			Expect(model.Close()).To(Succeed())
 			model = nil
 		}
 	})
-
-	newMTPContext := func(opts ...llama.ContextOption) *llama.Context {
-		c, err := model.NewContext(append([]llama.ContextOption{
-			llama.WithContext(2048), llama.WithMTP(),
-		}, opts...)...)
-		Expect(err).NotTo(HaveOccurred())
-		return c
-	}
 
 	Context("creating a context", func() {
 		It("should need the head to be loaded", Label("integration"), func() {
@@ -276,7 +331,7 @@ var _ = Describe("MTP speculative decoding", Label("speculative", "mtp"), func()
 
 		It("should reject a draft model as well", Label("integration"), func() {
 			_, err := model.NewContext(llama.WithMTP(), llama.WithDraft(model))
-			Expect(err).To(MatchError(ContainSubstring("not both")))
+			Expect(err).To(MatchError("use only one of WithDraft, WithMTP and WithMTPModel"))
 		})
 
 		It("should reject an embedding context", Label("integration"), func() {
@@ -285,61 +340,67 @@ var _ = Describe("MTP speculative decoding", Label("speculative", "mtp"), func()
 		})
 	})
 
-	Context("generating", func() {
-		It("should give the same output for the same seed", Label("integration"), func() {
-			ctx = newMTPContext()
-			first, err := ctx.Generate(prompt, llama.WithSeed(12345), llama.WithMaxTokens(40))
-			Expect(err).NotTo(HaveOccurred())
-			Expect(first).NotTo(BeEmpty())
-			second, err := ctx.Generate(prompt, llama.WithSeed(12345), llama.WithMaxTokens(40))
-			Expect(err).NotTo(HaveOccurred())
-			Expect(second).To(Equal(first))
+	describeMTPGeneration(func(opts ...llama.ContextOption) *llama.Context {
+		c, err := model.NewContext(append([]llama.ContextOption{llama.WithContext(2048), llama.WithMTP()}, opts...)...)
+		Expect(err).NotTo(HaveOccurred())
+		return c
+	})
+})
+
+// TEST_MTP_SIDECAR_MODEL names a model whose MTP head is a separate sidecar
+// file, such as Gemma 4. As llama.cpp's downloader expects, the head is the
+// mtp-*.gguf in the same folder.
+var _ = Describe("MTP with a separate head", Label("speculative", "mtp"), func() {
+	var model, head *llama.Model
+
+	BeforeEach(func() {
+		modelPath := os.Getenv("TEST_MTP_SIDECAR_MODEL")
+		if modelPath == "" {
+			Skip("TEST_MTP_SIDECAR_MODEL not set - skipping integration test")
+		}
+		heads, err := filepath.Glob(filepath.Join(filepath.Dir(modelPath), "mtp-*.gguf"))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(heads).To(HaveLen(1), "expected one mtp-*.gguf beside TEST_MTP_SIDECAR_MODEL")
+		headPath := heads[0]
+
+		model, err = llama.LoadModel(modelPath, llama.WithGPULayers(-1))
+		Expect(err).NotTo(HaveOccurred())
+		head, err = llama.LoadModel(headPath, llama.WithGPULayers(-1))
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	AfterEach(func() {
+		if head != nil {
+			Expect(head.Close()).To(Succeed())
+			head = nil
+		}
+		if model != nil {
+			Expect(model.Close()).To(Succeed())
+			model = nil
+		}
+	})
+
+	Context("creating a context", func() {
+		It("should reject a nil head", Label("integration"), func() {
+			_, err := model.NewContext(llama.WithMTPModel(nil))
+			Expect(err).To(MatchError(ContainSubstring("MTP head model cannot be nil")))
 		})
 
-		It("should match a fresh context after reusing the cache", Label("integration"), func() {
-			ctx = newMTPContext()
-			_, err := ctx.Generate(prompt+" Berlin. The capital of Italy is",
-				llama.WithTemperature(0), llama.WithMaxTokens(20))
-			Expect(err).NotTo(HaveOccurred())
-			reused, err := ctx.Generate(prompt, llama.WithTemperature(0), llama.WithMaxTokens(40))
-			Expect(err).NotTo(HaveOccurred())
-
-			fresh := newMTPContext()
-			defer func() { Expect(fresh.Close()).To(Succeed()) }()
-			expected, err := fresh.Generate(prompt, llama.WithTemperature(0), llama.WithMaxTokens(40))
-			Expect(err).NotTo(HaveOccurred())
-			Expect(reused).To(Equal(expected))
+		It("should reject a draft model as well", Label("integration"), func() {
+			_, err := model.NewContext(llama.WithMTPModel(head), llama.WithDraft(head))
+			Expect(err).To(MatchError("use only one of WithDraft, WithMTP and WithMTPModel"))
 		})
 
-		It("should stop after max tokens", Label("integration"), func() {
-			ctx = newMTPContext(llama.WithDraftTokens(2))
-			var tokens int
-			err := ctx.GenerateStream("Count from one to one hundred: one, two, three,", func(string) bool {
-				tokens++
-				return true
-			}, llama.WithTemperature(0), llama.WithMaxTokens(7), llama.WithIgnoreEOS(true))
-			Expect(err).NotTo(HaveOccurred())
-			Expect(tokens).To(Equal(7))
+		It("should reject a closed head", Label("integration"), func() {
+			Expect(head.Close()).To(Succeed())
+			_, err := model.NewContext(llama.WithMTPModel(head))
+			Expect(err).To(MatchError("draft model is closed"))
 		})
+	})
 
-		It("should stop when the callback returns false", Label("integration"), func() {
-			ctx = newMTPContext()
-			var tokens int
-			err := ctx.GenerateStream(prompt, func(string) bool {
-				tokens++
-				return tokens < 3
-			}, llama.WithTemperature(0), llama.WithMaxTokens(40), llama.WithIgnoreEOS(true))
-			Expect(err).NotTo(HaveOccurred())
-			Expect(tokens).To(Equal(3))
-		})
-
-		It("should speculate in chat", Label("integration", "chat"), func() {
-			ctx = newMTPContext()
-			response, err := ctx.Chat(context.Background(),
-				[]llama.ChatMessage{{Role: "user", Content: "Name three primary colours."}},
-				llama.ChatOptions{MaxTokens: llama.Int(40), Temperature: llama.Float32(0), EnableThinking: llama.Bool(false)})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(response.Content).NotTo(BeEmpty())
-		})
+	describeMTPGeneration(func(opts ...llama.ContextOption) *llama.Context {
+		c, err := model.NewContext(append([]llama.ContextOption{llama.WithContext(2048), llama.WithMTPModel(head)}, opts...)...)
+		Expect(err).NotTo(HaveOccurred())
+		return c
 	})
 })

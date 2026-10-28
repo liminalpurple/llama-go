@@ -348,7 +348,7 @@ func WithDraft(draft *Model) ContextOption {
 // then verifies in one pass. Like WithDraft, Generate, Chat and their
 // streaming variants then speculate automatically, and WithDraftTokens sets
 // how many tokens the head proposes per step. It can't be combined with
-// WithDraft, and needs a generation context with one sequence.
+// WithDraft or WithMTPModel, and needs a generation context with one sequence.
 //
 // Example:
 //
@@ -357,6 +357,30 @@ func WithDraft(draft *Model) ContextOption {
 func WithMTP() ContextOption {
 	return func(c *contextConfig) {
 		c.mtp = true
+	}
+}
+
+// WithMTPModel enables speculative decoding with a multi-token prediction
+// (MTP) head shipped as a separate file, such as Gemma 4's mtp-*.gguf.
+//
+// The head is loaded with LoadModel and must stay open while the context uses
+// it. It reads this model's memory directly, so it drafts without decoding
+// the prompt itself. Like WithMTP, every generation method then speculates,
+// and WithDraftTokens sets how many tokens it proposes per step. It can't be
+// combined with WithDraft or WithMTP.
+//
+// Example:
+//
+//	model, _ := llama.LoadModel("gemma-4-E2B-it-Q4_K_M.gguf")
+//	head, _ := llama.LoadModel("mtp-gemma-4-E2B-it-Q8_0.gguf")
+//	ctx, err := model.NewContext(llama.WithMTPModel(head), llama.WithDraftTokens(2))
+func WithMTPModel(head *Model) ContextOption {
+	return func(c *contextConfig) {
+		if head == nil {
+			c.setErr(fmt.Errorf("MTP head model cannot be nil"))
+			return
+		}
+		c.mtpModel = head
 	}
 }
 

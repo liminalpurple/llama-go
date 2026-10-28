@@ -34,7 +34,7 @@ typedef struct {
     bool embeddings;       // Enable embeddings
     bool swa_full;         // Keep the whole context in sliding-window layers' cache
     void* draft_model;     // Draft model for speculative decoding (NULL = none)
-    bool mtp;              // Speculate with the model's built-in MTP head
+    bool mtp;              // Speculate with an MTP head: draft_model, or the model's built-in head
     int n_draft;           // Maximum drafted tokens per step; 0 = default
     bool load_mtp;         // Load the model's built-in MTP head, if it has one
     const char* main_gpu;   // Main GPU

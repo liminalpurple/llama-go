@@ -245,7 +245,8 @@ Options use the functional options pattern, separated into ModelOption and Conte
 
 **Context options** (affect execution): `WithContext`, `WithBatch`, `WithUBatch`, `WithThreads`,
 `WithThreadsBatch`, `WithF16Memory`, `WithEmbeddings`, `WithKVCacheType`, `WithFlashAttn`,
-`WithParallel`, `WithPrefixCaching`, `WithSWAFull`, `WithDraft`, `WithMTP`, `WithDraftTokens`
+`WithParallel`, `WithPrefixCaching`, `WithSWAFull`, `WithDraft`, `WithMTP`, `WithMTPModel`,
+`WithDraftTokens`
 
 **RoPE options** (extend context beyond the training length): `WithRopeScaling`,
 `WithRopeFreqBase`, `WithRopeFreqScale`, `WithYarnExtFactor`, `WithYarnAttnFactor`,
@@ -466,6 +467,21 @@ result, _ := ctx.Generate("Write a story about", llama.WithMaxTokens(500))
 On an RTX 3090 at temperature 0, two drafted tokens per step gave 1.3× the speed of plain
 generation for Qwen3.5 0.8B, 1.45× for a Qwen3.5 9B, and 1.8× for a Qwen3.5 27B. The same
 near-tie caveat applies as for draft models.
+
+Other models, such as Gemma 4, ship the head as a separate file (`mtp-*.gguf`). Load it like any
+model and pass it to `WithMTPModel`; it must stay open while the context uses it:
+
+```go
+model, _ := llama.LoadModel("gemma-4-E2B-it-Q4_K_M.gguf")
+defer model.Close()
+head, _ := llama.LoadModel("mtp-gemma-4-E2B-it-Q8_0.gguf")
+defer head.Close()
+
+ctx, _ := model.NewContext(llama.WithMTPModel(head), llama.WithDraftTokens(2))
+defer ctx.Close()
+```
+
+On the same RTX 3090, Gemma 4 E2B with its head ran 1.3× faster at two drafted tokens.
 
 ### Multi-context usage
 

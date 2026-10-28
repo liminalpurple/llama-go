@@ -17,9 +17,11 @@ type contextConfig struct {
 	prefixCaching bool // Enable KV cache prefix reuse (default: true)
 	swaFull       bool // Full-size cache for sliding-window layers (default: false)
 
-	// Speculative decoding; nil draftModel and false mtp mean none
+	// Speculative decoding: at most one of a draft model, the model's own
+	// MTP head, or a separate MTP head
 	draftModel  *Model
 	mtp         bool
+	mtpModel    *Model
 	draftTokens int    // Maximum drafted tokens per step (default: 3)
 	kvCacheType string // KV cache quantization type: "f16", "q8_0", "q4_0" (default: "q8_0")
 	flashAttn   string // Flash Attention mode: "auto", "enabled", "disabled" (default: "auto")
