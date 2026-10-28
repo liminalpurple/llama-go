@@ -36,7 +36,7 @@ func main() {
 		context     = flag.Int("c", 2048, "context size")
 		gpuLayers   = flag.Int("ngl", -1, "number of GPU layers (-1 for all)")
 		temp        = flag.Float64("temp", 0.7, "temperature for sampling")
-		draftTokens = flag.Int("draft-tokens", 16, "most tokens the draft model proposes per step")
+		draftTokens = flag.Int("draft-tokens", 3, "most tokens the draft model proposes per step")
 		debug       = flag.Bool("debug", false, "enable debug output")
 	)
 	flag.Parse()

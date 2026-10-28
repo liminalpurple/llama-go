@@ -420,7 +420,7 @@ defer draft.Close()
 ctx, _ := target.NewContext(
     llama.WithContext(2048),
     llama.WithDraft(draft),
-    llama.WithDraftTokens(16), // Propose up to 16 tokens per step
+    llama.WithDraftTokens(4), // Propose up to 4 tokens per step (default 3)
 )
 defer ctx.Close()
 

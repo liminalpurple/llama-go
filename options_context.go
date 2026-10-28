@@ -345,7 +345,7 @@ func WithDraft(draft *Model) ContextOption {
 // Higher values speed up text the draft predicts well, but waste more work
 // when its predictions are rejected. Capped at one less than the batch size.
 //
-// Default: 16
+// Default: 3, as in llama.cpp
 //
 // Example:
 //

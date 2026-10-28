@@ -346,7 +346,7 @@ void* llama_wrapper_context_create(void* model, llama_wrapper_model_params param
             // The whole verification batch is decoded at once, so the draft
             // must fit in a batch alongside the token before it
             const int n_batch = (int)llama_n_batch(ctx_wrapper->ctx);
-            ctx_wrapper->n_draft = std::min(params.n_draft > 0 ? params.n_draft : 16, n_batch - 1);
+            ctx_wrapper->n_draft = std::min(params.n_draft > 0 ? params.n_draft : 3, n_batch - 1);
             if (ctx_wrapper->n_draft < 1) {
                 throw std::runtime_error("batch size is too small for speculative decoding");
             }
@@ -366,7 +366,6 @@ void* llama_wrapper_context_create(void* model, llama_wrapper_model_params param
             common_params_speculative spec_params;
             spec_params.types         = { COMMON_SPECULATIVE_TYPE_DRAFT_SIMPLE };
             spec_params.draft.n_max   = ctx_wrapper->n_draft;
-            spec_params.draft.p_min   = 0.75f;
             spec_params.draft.ctx_tgt = ctx_wrapper->ctx;
             spec_params.draft.ctx_dft = ctx_wrapper->draft->ctx;
             ctx_wrapper->spec = common_speculative_init(spec_params, 1);

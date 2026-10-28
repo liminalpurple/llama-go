@@ -19,7 +19,7 @@ type contextConfig struct {
 
 	// Speculative decoding; nil draftModel means none
 	draftModel  *Model
-	draftTokens int    // Maximum drafted tokens per step (default: 16)
+	draftTokens int    // Maximum drafted tokens per step (default: 3)
 	kvCacheType string // KV cache quantization type: "f16", "q8_0", "q4_0" (default: "q8_0")
 	flashAttn   string // Flash Attention mode: "auto", "enabled", "disabled" (default: "auto")
 
@@ -103,7 +103,7 @@ var defaultContextConfig = contextConfig{
 	prefixCaching: true,   // Enable by default for performance
 	kvCacheType:   "q8_0", // 50% VRAM savings with ~0.1% quality loss
 	flashAttn:     "auto", // Let llama.cpp choose optimal path
-	draftTokens:   16,
+	draftTokens:   3,
 }
 
 var defaultGenerateConfig = generateConfig{
