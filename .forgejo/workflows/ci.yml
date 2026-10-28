@@ -31,6 +31,12 @@ jobs:
       # Test models for integration tests
       TEST_CHAT_MODEL: Qwen3-0.6B-Q8_0.gguf
       TEST_EMBEDDING_MODEL: Qwen3-Embedding-0.6B-Q8_0.gguf
+      # Qwen3.5 0.8B is recurrent and has a built-in MTP head
+      TEST_MTP_MODEL: Qwen3.5-0.8B-Q8_0.gguf
+      # A second chat model with sliding-window attention, and an MTP head
+      # in the sidecar file beside it
+      TEST_GEMMA_MODEL: gemma-4-E2B-it-Q4_K_M.gguf
+      TEST_MTP_SIDECAR_MODEL: gemma-4-E2B-it-Q4_K_M.gguf
       # Suppress verbose llama.cpp logs (set to "info" or "debug" for debugging)
       LLAMA_LOG: error
     steps:
@@ -49,7 +55,10 @@ jobs:
           path: |
             Qwen3-0.6B-Q8_0.gguf
             Qwen3-Embedding-0.6B-Q8_0.gguf
-          key: test-models-qwen3-0.6b-q8-v1
+            Qwen3.5-0.8B-Q8_0.gguf
+            gemma-4-E2B-it-Q4_K_M.gguf
+            mtp-gemma-4-E2B-it-Q8_0.gguf
+          key: test-models-v2
 
       - name: Cache dependencies
         uses: https://github.com/actions/cache@v4
@@ -98,10 +107,30 @@ jobs:
           if [ ! -f Qwen3-Embedding-0.6B-Q8_0.gguf ]; then
             wget -q https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf
           fi
+          # The MTP build keeps the head that unsloth/Qwen3.5-0.8B-GGUF strips
+          if [ ! -f Qwen3.5-0.8B-Q8_0.gguf ]; then
+            wget -q https://huggingface.co/unsloth/Qwen3.5-0.8B-MTP-GGUF/resolve/main/Qwen3.5-0.8B-Q8_0.gguf
+          fi
+          if [ ! -f gemma-4-E2B-it-Q4_K_M.gguf ]; then
+            wget -q https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf
+          fi
+          if [ ! -f mtp-gemma-4-E2B-it-Q8_0.gguf ]; then
+            wget -q https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/MTP/mtp-gemma-4-E2B-it-Q8_0.gguf
+          fi
 
       - name: Run tests
         run: |
           go run github.com/onsi/ginkgo/v2/ginkgo -tags cublas --flake-attempts 3 -v ./...
+
+      # Repeat only the chat-model tests with Gemma 4, whose sliding-window
+      # memory and instruct behaviour differ from Qwen's
+      - name: Run tests with Gemma 4
+        env:
+          TEST_EMBEDDING_MODEL: ""
+          TEST_MTP_MODEL: ""
+          TEST_MTP_SIDECAR_MODEL: ""
+        run: |
+          TEST_CHAT_MODEL=$TEST_GEMMA_MODEL go run github.com/onsi/ginkgo/v2/ginkgo -tags cublas --flake-attempts 3 -v ./...
 
       - name: Run example
         run: |
