@@ -44,6 +44,11 @@ jobs:
       TEST_GEMMA_MODEL: gemma-4-E2B-it/gemma-4-E2B-it-Q4_K_M.gguf
       TEST_MTP_SIDECAR_MODEL: gemma-4-E2B-it/gemma-4-E2B-it-Q4_K_M.gguf
       TEST_AUDIO_MODEL: gemma-4-E2B-it/gemma-4-E2B-it-Q4_K_M.gguf
+      # Decision models: three small ones that between them read answers from
+      # logits, an encoder and a pointer head, and vLLM D3, which sees well
+      # enough for its answers about images to be checked
+      TEST_DECISION_MODELS: decision-tinyopenjev/tinyopenjev-for-testing-Q8_0.gguf,decision-tinylaya/tinylaya-for-testing-Q8_0.gguf,Kev-0.8B/Kev-0.8B-Q8_0.gguf
+      TEST_DECISION_VISION_MODEL: vllm-d3-edge/vllm-d3-edge-Q8_0.gguf
       LLAMA_LOG: error
     steps:
       - name: Checkout code
@@ -63,7 +68,11 @@ jobs:
             Qwen3-Embedding-0.6B-Q8_0.gguf
             Qwen3.5-0.8B
             gemma-4-E2B-it
-          key: test-models-v3
+            decision-tinyopenjev
+            decision-tinylaya
+            Kev-0.8B
+            vllm-d3-edge
+          key: test-models-v4
 
       - name: Cache dependencies
         uses: https://github.com/actions/cache@v4
@@ -108,6 +117,12 @@ jobs:
           fetch gemma-4-E2B-it unsloth/gemma-4-E2B-it-GGUF gemma-4-E2B-it-Q4_K_M.gguf
           fetch gemma-4-E2B-it unsloth/gemma-4-E2B-it-GGUF MTP/mtp-gemma-4-E2B-it-Q8_0.gguf
           fetch gemma-4-E2B-it unsloth/gemma-4-E2B-it-GGUF mmproj-F16.gguf
+          fetch decision-tinyopenjev ggml-org/tinyopenjev-for-testing-gguf tinyopenjev-for-testing-Q8_0.gguf
+          fetch decision-tinyopenjev ggml-org/tinyopenjev-for-testing-gguf mmproj-tinyopenjev-for-testing-Q8_0.gguf
+          fetch decision-tinylaya ggml-org/tinylaya-for-testing-gguf tinylaya-for-testing-Q8_0.gguf
+          fetch Kev-0.8B ggml-org/Kev-0.8B-GGUF Kev-0.8B-Q8_0.gguf
+          fetch vllm-d3-edge ggml-org/vllm-d3-edge-GGUF vllm-d3-edge-Q8_0.gguf
+          fetch vllm-d3-edge ggml-org/vllm-d3-edge-GGUF mmproj-vllm-d3-edge-Q8_0.gguf
 
       - name: Compute Go build tags
         id: tags
@@ -131,6 +146,8 @@ jobs:
           TEST_MTP_SIDECAR_MODEL: ""
           TEST_VISION_MODEL: ""
           TEST_AUDIO_MODEL: ""
+          TEST_DECISION_MODELS: ""
+          TEST_DECISION_VISION_MODEL: ""
         run: |
           TEST_CHAT_MODEL=$TEST_GEMMA_MODEL go run github.com/onsi/ginkgo/v2/ginkgo -tags '${{ steps.tags.outputs.tags }}' --flake-attempts 3 -v ./...
 
