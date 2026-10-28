@@ -145,6 +145,7 @@ func LoadModel(path string, opts ...ModelOption) (*Model, error) {
 		f16_memory:      false,
 		mlock:           C.bool(config.mlock),
 		mmap:            C.bool(config.mmap),
+		load_mtp:        C.bool(config.mtpHead),
 		embeddings:      false,
 		main_gpu:        cMainGPU,
 		tensor_split:    cTensorSplit,
@@ -312,6 +313,7 @@ func (m *Model) NewContext(opts ...ContextOption) (*Context, error) {
 		embeddings:      C.bool(config.embeddings),
 		swa_full:        C.bool(config.swaFull),
 		draft_model:     draftPtr,
+		mtp:             C.bool(config.mtp),
 		n_draft:         C.int(config.draftTokens),
 		main_gpu:        nil, // Not used for context creation
 		tensor_split:    nil, // Not used for context creation
@@ -450,6 +452,17 @@ func (m *Model) FormatChatPrompt(messages []ChatMessage, opts ChatOptions) (stri
 	defer session.close()
 
 	return session.prompt(), nil
+}
+
+// HasMTPHead reports whether the model file holds a built-in multi-token
+// prediction (MTP) head, which WithMTPHead loads and WithMTP speculates with.
+func (m *Model) HasMTPHead() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.closed {
+		return false
+	}
+	return bool(C.llama_wrapper_model_has_mtp_head(m.modelPtr))
 }
 
 // SupportsThinking reports whether the model's chat template supports

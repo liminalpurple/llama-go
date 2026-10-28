@@ -340,6 +340,26 @@ func WithDraft(draft *Model) ContextOption {
 	}
 }
 
+// WithMTP enables speculative decoding with the model's built-in
+// multi-token prediction (MTP) head, loaded with WithMTPHead.
+//
+// The head runs on this model's own weights in a second context, proposing
+// tokens from the hidden states of the tokens just decoded, which the model
+// then verifies in one pass. Like WithDraft, Generate, Chat and their
+// streaming variants then speculate automatically, and WithDraftTokens sets
+// how many tokens the head proposes per step. It can't be combined with
+// WithDraft, and needs a generation context with one sequence.
+//
+// Example:
+//
+//	model, _ := llama.LoadModel("model.gguf", llama.WithMTPHead())
+//	ctx, err := model.NewContext(llama.WithMTP(), llama.WithDraftTokens(2))
+func WithMTP() ContextOption {
+	return func(c *contextConfig) {
+		c.mtp = true
+	}
+}
+
 // WithDraftTokens sets the most tokens the draft model proposes per step.
 //
 // Higher values speed up text the draft predicts well, but waste more work

@@ -17,8 +17,9 @@ type contextConfig struct {
 	prefixCaching bool // Enable KV cache prefix reuse (default: true)
 	swaFull       bool // Full-size cache for sliding-window layers (default: false)
 
-	// Speculative decoding; nil draftModel means none
+	// Speculative decoding; nil draftModel and false mtp mean none
 	draftModel  *Model
+	mtp         bool
 	draftTokens int    // Maximum drafted tokens per step (default: 3)
 	kvCacheType string // KV cache quantization type: "f16", "q8_0", "q4_0" (default: "q8_0")
 	flashAttn   string // Flash Attention mode: "auto", "enabled", "disabled" (default: "auto")
@@ -164,6 +165,7 @@ type modelConfig struct {
 	tensorSplit             string
 	disableProgressCallback bool
 	progressCallback        ProgressCallback
+	mtpHead                 bool
 }
 
 // Default model configuration

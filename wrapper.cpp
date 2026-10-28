@@ -1,6 +1,7 @@
 #include "wrapper.h"
 #include "llama.cpp/include/llama.h"
 #include "llama.cpp/ggml/include/ggml.h"
+#include "llama.cpp/ggml/include/gguf.h"
 #include "llama.cpp/common/common.h"
 #include "llama.cpp/common/sampling.h"
 #include "llama.cpp/common/speculative.h"
@@ -110,7 +111,49 @@ extern bool goProgressCallback(float progress, void* user_data);
 struct llama_wrapper_model_t {
     llama_model* model;
     int n_gpu_layers;  // Number of GPU layers requested (for stats reporting)
+    bool has_mtp_head = false;  // The file holds a built-in MTP head
+    bool mtp_loaded = false;    // ...and it was loaded alongside the weights
 };
+
+// Whether a model file holds MTP head tensors. A file can declare a head and
+// ship without it, so check the tensor names, across every split. Only the
+// headers are read.
+static bool file_has_mtp_head(const char * path) {
+    const gguf_init_params gparams = { /*.no_alloc =*/ true, /*.ctx =*/ nullptr };
+    int n_split = 1;
+    auto scan = [&](const char * file, bool first) {
+        gguf_context * gguf = gguf_init_from_file(file, gparams);
+        if (!gguf) {
+            return false;
+        }
+        if (first) {
+            const int64_t key = gguf_find_key(gguf, "split.count");
+            n_split = key >= 0 ? gguf_get_val_u16(gguf, key) : 1;
+        }
+        bool found = false;
+        for (int64_t i = 0; i < gguf_get_n_tensors(gguf) && !found; i++) {
+            found = strstr(gguf_get_tensor_name(gguf, i), ".nextn.") != nullptr;
+        }
+        gguf_free(gguf);
+        return found;
+    };
+
+    if (scan(path, true)) {
+        return true;
+    }
+    char prefix[4096];
+    if (n_split <= 1 || llama_split_prefix(prefix, sizeof(prefix), path, 0, n_split) == 0) {
+        return false;
+    }
+    for (int i = 1; i < n_split; i++) {
+        char split_path[4096];
+        llama_split_path(split_path, sizeof(split_path), prefix, i, n_split);
+        if (scan(split_path, false)) {
+            return true;
+        }
+    }
+    return false;
+}
 
 struct llama_wrapper_context_t {
     llama_context* ctx;
@@ -121,6 +164,8 @@ struct llama_wrapper_context_t {
     // prompt token instead
     bool needs_checkpoint = false;
     common_prompt_checkpoint checkpoint;
+    // How the memory can be trimmed, from the probe at creation
+    common_context_seq_rm_type rm_type = COMMON_CONTEXT_SEQ_RM_TYPE_PART;
     // State before the current speculative step, for rolling back rejected
     // drafted tokens on the same kinds of memory
     common_prompt_checkpoint step_checkpoint;
@@ -169,6 +214,7 @@ static struct llama_model_params convert_model_params(llama_wrapper_model_params
         model_params.load_mode = params.mlock ? LLAMA_LOAD_MODE_MLOCK : LLAMA_LOAD_MODE_NONE;
     }
     model_params.no_host = false;  // Use host buffers (b6709 added field)
+    model_params.load_mtp = params.load_mtp;
 
     // Configure progress callback
     if (params.disable_progress_callback) {
@@ -276,6 +322,8 @@ void* llama_wrapper_model_load(const char* model_path, llama_wrapper_model_param
         // Store n_gpu_layers for stats reporting
         // If -1 was passed (meaning "use default"), llama.cpp uses 999 layers
         wrapper->n_gpu_layers = (params.n_gpu_layers == -1) ? 999 : params.n_gpu_layers;
+        wrapper->has_mtp_head = llama_model_n_layer_nextn(model) > 0 && file_has_mtp_head(model_path);
+        wrapper->mtp_loaded = params.load_mtp && wrapper->has_mtp_head;
 
         return wrapper;
     } catch (const std::exception& e) {
@@ -311,10 +359,11 @@ static llama_wrapper_context_t* create_context(llama_model* model, const llama_c
     ctx_wrapper->model = model;
 
     if (!ctx_params.embeddings && llama_n_batch(ctx) < 2) {
+        ctx_wrapper->rm_type = COMMON_CONTEXT_SEQ_RM_TYPE_FULL;
         ctx_wrapper->needs_checkpoint = true;
     } else if (!ctx_params.embeddings) {
-        const auto rm_type = common_context_can_seq_rm(ctx);
-        ctx_wrapper->needs_checkpoint = rm_type != COMMON_CONTEXT_SEQ_RM_TYPE_PART ||
+        ctx_wrapper->rm_type = common_context_can_seq_rm(ctx);
+        ctx_wrapper->needs_checkpoint = ctx_wrapper->rm_type != COMMON_CONTEXT_SEQ_RM_TYPE_PART ||
                                         (llama_model_n_swa(model) > 0 && !ctx_params.swa_full);
     }
     return ctx_wrapper;
@@ -331,9 +380,37 @@ void* llama_wrapper_context_create(void* model, llama_wrapper_model_params param
         auto model_wrapper = static_cast<llama_wrapper_model_t*>(model);
         auto ctx_params = convert_context_params(params);
 
-        if (params.draft_model && (params.embeddings || ctx_params.n_seq_max != 1)) {
-            g_last_error = "A draft model needs a single-sequence generation context";
+        const bool speculate = params.draft_model || params.mtp;
+        if (speculate && (params.embeddings || ctx_params.n_seq_max != 1)) {
+            g_last_error = "Speculative decoding needs a single-sequence generation context";
             return nullptr;
+        }
+        if (params.draft_model && params.mtp) {
+            g_last_error = "Use either a draft model or the model's MTP head, not both";
+            return nullptr;
+        }
+        if (params.mtp && !model_wrapper->mtp_loaded) {
+            g_last_error = model_wrapper->has_mtp_head
+                ? "Load the model with its MTP head to speculate with it"
+                : "Model has no MTP head";
+            return nullptr;
+        }
+
+        // The whole verification batch is decoded at once, so the draft must
+        // fit in a batch alongside the token before it
+        int n_draft = 0;
+        if (speculate) {
+            n_draft = std::min(params.n_draft > 0 ? params.n_draft : 3, (int)ctx_params.n_batch - 1);
+            if (n_draft < 1) {
+                g_last_error = "Batch size is too small for speculative decoding";
+                return nullptr;
+            }
+        }
+
+        // As in common, an MTP target keeps a recurrent-state snapshot per
+        // drafted token, so rejected tokens can be trimmed without a checkpoint
+        if (params.mtp) {
+            ctx_params.n_rs_seq = n_draft;
         }
 
         ctx_wrapper = create_context(model_wrapper->model, ctx_params);
@@ -342,29 +419,29 @@ void* llama_wrapper_context_create(void* model, llama_wrapper_model_params param
             return nullptr;
         }
 
-        if (params.draft_model) {
-            // The whole verification batch is decoded at once, so the draft
-            // must fit in a batch alongside the token before it
-            const int n_batch = (int)llama_n_batch(ctx_wrapper->ctx);
-            ctx_wrapper->n_draft = std::min(params.n_draft > 0 ? params.n_draft : 3, n_batch - 1);
-            if (ctx_wrapper->n_draft < 1) {
-                throw std::runtime_error("batch size is too small for speculative decoding");
-            }
+        if (speculate) {
+            ctx_wrapper->n_draft = std::min(n_draft, (int)llama_n_batch(ctx_wrapper->ctx) - 1);
 
             // The draft context follows the target's settings, as in common,
-            // and is linked to the target for drafters that read its memory
+            // and is linked to the target for drafters that read its memory.
+            // An MTP draft context runs the head on the target's own weights.
             auto draft_params = ctx_params;
             draft_params.n_ctx = llama_n_ctx(ctx_wrapper->ctx);
             draft_params.n_rs_seq = 0;
             draft_params.ctx_other = ctx_wrapper->ctx;
-            auto draft_model = static_cast<llama_wrapper_model_t*>(params.draft_model);
-            ctx_wrapper->draft = create_context(draft_model->model, draft_params);
+            llama_model* draft_model = model_wrapper->model;
+            if (params.mtp) {
+                draft_params.ctx_type = LLAMA_CONTEXT_TYPE_MTP;
+            } else {
+                draft_model = static_cast<llama_wrapper_model_t*>(params.draft_model)->model;
+            }
+            ctx_wrapper->draft = create_context(draft_model, draft_params);
             if (!ctx_wrapper->draft) {
                 throw std::runtime_error("failed to create draft context");
             }
 
             common_params_speculative spec_params;
-            spec_params.types         = { COMMON_SPECULATIVE_TYPE_DRAFT_SIMPLE };
+            spec_params.types         = { params.mtp ? COMMON_SPECULATIVE_TYPE_DRAFT_MTP : COMMON_SPECULATIVE_TYPE_DRAFT_SIMPLE };
             spec_params.draft.n_max   = ctx_wrapper->n_draft;
             spec_params.draft.ctx_tgt = ctx_wrapper->ctx;
             spec_params.draft.ctx_dft = ctx_wrapper->draft->ctx;
@@ -421,6 +498,10 @@ int llama_wrapper_model_n_embd_out(void* model) {
 
     auto model_wrapper = static_cast<llama_wrapper_model_t*>(model);
     return llama_model_n_embd_out(model_wrapper->model);
+}
+
+bool llama_wrapper_model_has_mtp_head(void* model) {
+    return model && static_cast<llama_wrapper_model_t*>(model)->has_mtp_head;
 }
 
 // Helper function to find common prefix length between two token vectors
@@ -500,21 +581,17 @@ static common_params_sampling make_sampling_params(const llama_wrapper_generate_
 // Decodes one batch of at most n_batch entries into a context
 using decode_fn = std::function<bool(common_batch &)>;
 
-// Bring a context's memory to hold the prompt, resuming after the part it
-// shares with the previous prompt, and decode the last prompt token with
-// output. Memory that can't be trimmed resumes from a checkpoint saved before
-// the last prompt token. Sets g_last_error and returns false on failure.
-static bool prepare_prompt(llama_wrapper_context_t * w, const std::vector<llama_token> & tokens,
-                           int prefix_len, bool cache, const decode_fn & decode) {
-    const int n_tokens = (int)tokens.size();
-
+// Restore a context's memory to resume a prompt of n_tokens after at most
+// limit tokens, always leaving the last prompt token to decode so its logits
+// are fresh. Memory that can't be trimmed resumes from the checkpoint saved
+// before the last prompt token, or from the start. Returns where decoding
+// resumes, or -1 with g_last_error set.
+static int restore_prompt(llama_wrapper_context_t * w, int n_tokens, int limit) {
     // Memory no longer matches cached_tokens until the new prompt is decoded
     w->cached_tokens.clear();
 
-    // Resume after the shared prefix, always leaving the last prompt token
-    // to decode so its logits are fresh
     llama_memory_t mem = llama_get_memory(w->ctx);
-    int resume_from = std::min(prefix_len, n_tokens - 1);
+    int resume_from = std::min(limit, n_tokens - 1);
     if (w->needs_checkpoint) {
         const auto & ckpt = w->checkpoint;
         if (!ckpt.empty() && ckpt.n_tokens <= resume_from &&
@@ -529,52 +606,36 @@ static bool prepare_prompt(llama_wrapper_context_t * w, const std::vector<llama_
         w->checkpoint.clear();
         if (!llama_memory_seq_rm(mem, 0, -1, -1)) {
             g_last_error = "Failed to clear memory";
-            return false;
+            return -1;
         }
     } else if (!w->needs_checkpoint && !llama_memory_seq_rm(mem, 0, resume_from, -1)) {
         g_last_error = "Failed to trim memory to the cached prefix";
-        return false;
+        return -1;
     }
-
-    // Decode prompt tokens [from, to) in n_batch chunks with explicit positions
-    const int n_batch = (int)llama_n_batch(w->ctx);
-    auto decode_range = [&](int from, int to, bool output_last) {
-        for (int start = from; start < to; start += n_batch) {
-            const int end = std::min(to, start + n_batch);
-            common_batch batch(w->ctx);
-            for (int pos = start; pos < end; pos++) {
-                batch.add(tokens[pos], pos, 0, output_last && pos == to - 1);
-            }
-            if (!decode(batch)) {
-                return false;
-            }
-        }
-        return true;
-    };
-
-    // Decode up to the last prompt token, checkpoint there if this memory
-    // can't be trimmed, then decode the last token for its logits
-    bool ok = decode_range(resume_from, n_tokens - 1, false);
-    if (ok && cache && w->needs_checkpoint && n_tokens > 1 &&
-        (w->checkpoint.empty() || w->checkpoint.n_tokens != n_tokens - 1)) {
-        w->checkpoint.update_pos(n_tokens - 1, llama_memory_seq_pos_min(mem, 0), llama_memory_seq_pos_max(mem, 0));
-        w->checkpoint.update_tgt(w->ctx, 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
-    }
-    ok = ok && decode_range(n_tokens - 1, n_tokens, true);
-    if (!ok) {
-        w->checkpoint.clear();
-        g_last_error = "Failed to decode prompt";
-        return false;
-    }
-
-    if (cache) {
-        w->cached_tokens.assign(tokens.begin(), tokens.end());
-    }
-    return true;
+    return resume_from;
 }
 
-// Save the state before a speculative step at n_past, for memory that can't
-// be trimmed back to the tokens the target accepts
+// Save the prompt checkpoint before the last prompt token, for memory that
+// can't be trimmed back to it
+static void save_prompt_checkpoint(llama_wrapper_context_t * w, int n_tokens) {
+    if (!w->needs_checkpoint || n_tokens < 2 ||
+        (!w->checkpoint.empty() && w->checkpoint.n_tokens == n_tokens - 1)) {
+        return;
+    }
+    llama_memory_t mem = llama_get_memory(w->ctx);
+    w->checkpoint.update_pos(n_tokens - 1, llama_memory_seq_pos_min(mem, 0), llama_memory_seq_pos_max(mem, 0));
+    w->checkpoint.update_tgt(w->ctx, 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+}
+
+// Whether rolling back n tokens after a speculative step needs the state
+// saved before it, as in the server: memory that can only be cleared whole
+// always does, and recurrent memory does beyond its snapshots
+static bool step_needs_checkpoint(const llama_wrapper_context_t * w, size_t n) {
+    return w->rm_type == COMMON_CONTEXT_SEQ_RM_TYPE_FULL ||
+           (w->rm_type == COMMON_CONTEXT_SEQ_RM_TYPE_RS && n > llama_n_rs_seq(w->ctx));
+}
+
+// Save the state before a speculative step at n_past
 static void save_step(llama_wrapper_context_t * w, llama_pos n_past) {
     llama_memory_t mem = llama_get_memory(w->ctx);
     w->step_checkpoint.update_pos(n_past, llama_memory_seq_pos_min(mem, 0), n_past - 1);
@@ -582,17 +643,20 @@ static void save_step(llama_wrapper_context_t * w, llama_pos n_past) {
 }
 
 // Roll a context back after a speculative step at n_past so its memory ends
-// with the kept tokens. Memory that can't be trimmed restores the state saved
-// before the step and decodes the kept tokens again.
+// with the kept tokens, by trimming, or by restoring the state saved before
+// the step and decoding the kept tokens again
 static bool roll_back_step(llama_wrapper_context_t * w, llama_pos n_past, const llama_tokens & keep,
-                           const decode_fn & decode) {
+                           bool from_checkpoint, const decode_fn & decode) {
     llama_memory_t mem = llama_get_memory(w->ctx);
-    if (!w->needs_checkpoint) {
+    if (!from_checkpoint) {
         return llama_memory_seq_rm(mem, 0, n_past + (llama_pos)keep.size(), -1);
     }
     if (!w->step_checkpoint.load_tgt(w->ctx, 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY) ||
         !llama_memory_seq_rm(mem, 0, n_past, -1)) {
         return false;
+    }
+    if (keep.empty()) {
+        return true;
     }
     common_batch batch(w->ctx);
     for (size_t i = 0; i < keep.size(); i++) {
@@ -649,25 +713,78 @@ char* llama_wrapper_generate_with_tokens(void* ctx, const int* tokens, int n_tok
         }
         const int n_predict = params.max_tokens > 0 ? params.max_tokens : 128;
 
-        // With a draft model, every batch decoded into the target is also
-        // decoded into the draft context through the speculative module
+        // With a drafter, every batch decoded into the target is passed on to
+        // the speculative module straight after, as in the server: it decodes
+        // the batch into the draft context, and an MTP head reads the target's
+        // hidden states for it
         llama_wrapper_context_t * draft = wrapper->draft;
         common_speculative * spec = wrapper->spec;
-        const decode_fn decode_tgt = [&](common_batch & batch) {
-            return decode_batch(wrapper->ctx, batch) == 0;
-        };
         const decode_fn decode_dft = [&](common_batch & batch) {
             return common_speculative_process(spec, batch);
         };
+        const decode_fn decode_tgt = [&](common_batch & batch) {
+            return decode_batch(wrapper->ctx, batch) == 0;
+        };
+        const decode_fn decode_both = [&](common_batch & batch) {
+            return decode_tgt(batch) && (!spec || decode_dft(batch));
+        };
 
-        if (!prepare_prompt(wrapper, prompt_tokens, prefix_len, params.enable_prefix_caching, decode_tgt)) {
+        // Both contexts resume the prompt from the same position, the furthest
+        // one they can both restore
+        const bool cache = params.enable_prefix_caching;
+        int resume_from = restore_prompt(wrapper, n_tokens, prefix_len);
+        while (draft && resume_from >= 0) {
+            const std::vector<int> prompt_ints(prompt_tokens.begin(), prompt_tokens.end());
+            const int draft_limit = std::min(resume_from, cache ? findCommonPrefix(draft->cached_tokens, prompt_ints) : 0);
+            const int draft_from = restore_prompt(draft, n_tokens, draft_limit);
+            if (draft_from < 0 || draft_from == resume_from) {
+                resume_from = draft_from;
+                break;
+            }
+            resume_from = restore_prompt(wrapper, n_tokens, draft_from);
+        }
+        if (resume_from < 0) {
             return nullptr;
         }
-        if (draft) {
-            const std::vector<int> prompt_ints(prompt_tokens.begin(), prompt_tokens.end());
-            const int draft_prefix = params.enable_prefix_caching ? findCommonPrefix(draft->cached_tokens, prompt_ints) : 0;
-            if (!prepare_prompt(draft, prompt_tokens, draft_prefix, params.enable_prefix_caching, decode_dft)) {
-                return nullptr;
+
+        // Decode prompt tokens [from, to) in n_batch chunks with explicit positions
+        const int n_batch = (int)llama_n_batch(wrapper->ctx);
+        auto decode_prompt = [&](int from, int to, bool output_last) {
+            for (int start = from; start < to; start += n_batch) {
+                const int end = std::min(to, start + n_batch);
+                common_batch batch(wrapper->ctx);
+                for (int pos = start; pos < end; pos++) {
+                    batch.add(prompt_tokens[pos], pos, 0, output_last && pos == to - 1);
+                }
+                if (!decode_both(batch)) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        // Decode up to the last prompt token, checkpoint there if the memory
+        // can't be trimmed, then decode the last token for its logits
+        bool prompt_ok = decode_prompt(resume_from, n_tokens - 1, false);
+        if (prompt_ok && cache) {
+            save_prompt_checkpoint(wrapper, n_tokens);
+            if (draft) {
+                save_prompt_checkpoint(draft, n_tokens);
+            }
+        }
+        prompt_ok = prompt_ok && decode_prompt(n_tokens - 1, n_tokens, true);
+        if (!prompt_ok) {
+            wrapper->checkpoint.clear();
+            if (draft) {
+                draft->checkpoint.clear();
+            }
+            g_last_error = "Failed to decode prompt";
+            return nullptr;
+        }
+        if (cache) {
+            wrapper->cached_tokens.assign(prompt_tokens.begin(), prompt_tokens.end());
+            if (draft) {
+                draft->cached_tokens = wrapper->cached_tokens;
             }
         }
 
@@ -709,12 +826,16 @@ char* llama_wrapper_generate_with_tokens(void* ctx, const int* tokens, int n_tok
             common_speculative_begin(spec, 0, history);
         }
 
+        // A draft context that can't be trimmed is restored to before each
+        // step: after drafting, and after rejected drafted tokens
+        const bool draft_ckpt = spec && step_needs_checkpoint(draft, wrapper->n_draft + 1);
+
         llama_tokens drafted;
         bool generating = emit(id);
         while (generating) {
             drafted.clear();
             if (spec) {
-                if (draft->needs_checkpoint) {
+                if (draft_ckpt) {
                     save_step(draft, n_past);
                 }
                 auto & dp = common_speculative_get_draft_params(spec, 0);
@@ -729,14 +850,15 @@ char* llama_wrapper_generate_with_tokens(void* ctx, const int* tokens, int n_tok
 
                 // Return the draft context to before id; the verification
                 // batch decodes id and the drafted tokens into it again
-                if (!roll_back_step(draft, n_past, {}, decode_dft)) {
+                if (!roll_back_step(draft, n_past, {}, draft_ckpt, decode_dft)) {
                     g_last_error = "Failed to roll back the draft context";
                     return nullptr;
                 }
             }
 
             // Decode id, and any drafted tokens to verify them in one pass
-            if (wrapper->needs_checkpoint && !drafted.empty()) {
+            const bool target_ckpt = !drafted.empty() && step_needs_checkpoint(wrapper, drafted.size());
+            if (target_ckpt) {
                 save_step(wrapper, n_past);
             }
             common_batch batch(wrapper->ctx);
@@ -768,11 +890,11 @@ char* llama_wrapper_generate_with_tokens(void* ctx, const int* tokens, int n_tok
             llama_tokens keep{ id };
             keep.insert(keep.end(), accepted.begin(), accepted.begin() + n_accepted);
             if (n_accepted < drafted.size()) {
-                if (!roll_back_step(wrapper, n_past, keep, decode_tgt)) {
+                if (!roll_back_step(wrapper, n_past, keep, target_ckpt, decode_tgt)) {
                     g_last_error = "Failed to roll back rejected drafted tokens";
                     return nullptr;
                 }
-                if (spec && !roll_back_step(draft, n_past, keep, decode_dft)) {
+                if (spec && !roll_back_step(draft, n_past, keep, draft_ckpt, decode_dft)) {
                     g_last_error = "Failed to roll back the draft context";
                     return nullptr;
                 }

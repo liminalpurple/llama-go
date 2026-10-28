@@ -47,6 +47,22 @@ func WithMLock() ModelOption {
 	}
 }
 
+// WithMTPHead loads the model's built-in multi-token prediction (MTP) head,
+// if it has one, so its contexts can speculate with WithMTP.
+//
+// Some models, such as many Qwen3.5 fine-tunes, ship an MTP head alongside
+// their weights. llama.cpp skips it unless asked, as it costs extra memory.
+//
+// Example:
+//
+//	model, err := llama.LoadModel("model.gguf", llama.WithMTPHead())
+//	ctx, err := model.NewContext(llama.WithMTP())
+func WithMTPHead() ModelOption {
+	return func(c *modelConfig) {
+		c.mtpHead = true
+	}
+}
+
 // WithMMap enables or disables memory-mapped file I/O for model loading.
 //
 // Memory mapping (mmap) allows the OS to load model data on-demand rather than

@@ -34,7 +34,9 @@ typedef struct {
     bool embeddings;       // Enable embeddings
     bool swa_full;         // Keep the whole context in sliding-window layers' cache
     void* draft_model;     // Draft model for speculative decoding (NULL = none)
+    bool mtp;              // Speculate with the model's built-in MTP head
     int n_draft;           // Maximum drafted tokens per step; 0 = default
+    bool load_mtp;         // Load the model's built-in MTP head, if it has one
     const char* main_gpu;   // Main GPU
     const char* tensor_split; // Tensor split
     const char* kv_cache_type; // KV cache quantization: "f16", "q8_0", "q4_0"
@@ -165,6 +167,9 @@ int llama_wrapper_get_model_context_length(void* model);
 
 // Get the width of the model's output embeddings
 int llama_wrapper_model_n_embd_out(void* model);
+
+// Whether the model file holds a built-in MTP head
+bool llama_wrapper_model_has_mtp_head(void* model);
 
 // Chat template support
 const char* llama_wrapper_get_chat_template(void* model);
