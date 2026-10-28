@@ -256,7 +256,13 @@ $(info )
 llama.cpp/ggml-alloc.o: llama.cpp/ggml.o
 	cd build && cp -rf ggml/src/CMakeFiles/ggml-base.dir/ggml-alloc.c.o ../llama.cpp/ggml-alloc.o
 
-llama.cpp/ggml.o:
+# CMake tracks llama.cpp's sources itself, so always run its incremental build
+# (quick when nothing changed) and refresh the objects copied from it; with no
+# prerequisites, a submodule change would leave stale copies behind
+.PHONY: FORCE
+FORCE:
+
+llama.cpp/ggml.o: FORCE
 	mkdir -p build
 	cd build && CC="$(CC)" CXX="$(CXX)" cmake ../llama.cpp $(CMAKE_ARGS) -DLLAMA_CURL=OFF && VERBOSE=1 cmake --build . --config Release --target ggml llama && cp -rf ggml/src/CMakeFiles/ggml-base.dir/ggml.c.o ../llama.cpp/ggml.o
 
@@ -284,8 +290,12 @@ llama.cpp/sampling.o: llama.cpp/ggml.o
 llama.cpp/log.o: llama.cpp/ggml.o
 	$(CXX) $(CXXFLAGS) -I./llama.cpp -I./llama.cpp/common -I./llama.cpp/ggml/include -I./llama.cpp/include llama.cpp/common/log.cpp -o llama.cpp/log.o -c $(LDFLAGS)
 
-wrapper.o:
-	$(CXX) $(CXXFLAGS) -I./llama.cpp -I./llama.cpp/common -I./llama.cpp/ggml/include -I./llama.cpp/include wrapper.cpp -o wrapper.o -c $(LDFLAGS)
+# The compiler writes wrapper.d listing every header wrapper.cpp includes, so
+# changes to it or to llama.cpp's headers rebuild the wrapper
+wrapper.o: wrapper.cpp wrapper.h
+	$(CXX) $(CXXFLAGS) -MMD -MP -I./llama.cpp -I./llama.cpp/common -I./llama.cpp/ggml/include -I./llama.cpp/include wrapper.cpp -o wrapper.o -c $(LDFLAGS)
+
+-include wrapper.d
 
 # Vendored llama.cpp headers. Consumers fetching this repo through the Go module
 # proxy don't get the llama.cpp git submodule, so wrapper.cpp's #include
@@ -340,7 +350,7 @@ endif
 endif
 
 clean:
-	rm -rf *.o
+	rm -rf *.o *.d
 	rm -rf *.a
 	rm -rf *.so *.so.0
 	rm -rf llama.cpp/*.o
