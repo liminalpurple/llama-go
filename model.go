@@ -316,29 +316,37 @@ func (m *Model) NewContext(opts ...ContextOption) (*Context, error) {
 	}
 
 	params := C.llama_wrapper_model_params{
-		n_ctx:           C.int(config.contextSize),
-		n_batch:         C.int(config.batchSize),
-		n_ubatch:        C.int(config.uBatchSize),
-		n_gpu_layers:    0, // Not used for context creation (model already loaded)
-		n_threads:       C.int(config.threads),
-		n_threads_batch: C.int(config.threadsBatch),
-		n_parallel:      C.int(config.nParallel),
-		f16_memory:      C.bool(config.f16Memory),
-		mlock:           false, // Not used for context creation
-		mmap:            false, // Not used for context creation
-		embeddings:      C.bool(config.embeddings),
-		swa_full:        C.bool(config.swaFull),
-		draft_model:     draftPtr,
-		mtp:             C.bool(config.mtp),
-		n_draft:         C.int(config.draftTokens),
-		main_gpu:        nil, // Not used for context creation
-		tensor_split:    nil, // Not used for context creation
-		kv_cache_type:   cKVCacheType,
-		flash_attn:      cFlashAttn,
+		n_ctx:              C.int(config.contextSize),
+		n_batch:            C.int(config.batchSize),
+		n_ubatch:           C.int(config.uBatchSize),
+		n_gpu_layers:       0, // Not used for context creation (model already loaded)
+		n_threads:          C.int(config.threads),
+		n_threads_batch:    C.int(config.threadsBatch),
+		n_parallel:         C.int(config.nParallel),
+		f16_memory:         C.bool(config.f16Memory),
+		mlock:              false, // Not used for context creation
+		mmap:               false, // Not used for context creation
+		embeddings:         C.bool(config.embeddings),
+		swa_full:           C.bool(config.swaFull),
+		draft_model:        draftPtr,
+		mtp:                C.bool(config.mtp),
+		n_spec_synth_rates: C.int(len(config.specSynthRates)),
+		n_draft:            C.int(config.draftTokens),
+		main_gpu:           nil, // Not used for context creation
+		tensor_split:       nil, // Not used for context creation
+		kv_cache_type:      cKVCacheType,
+		flash_attn:         cFlashAttn,
 
 		rope_scaling_type: cRopeScaling,
 	}
 	setRopeOverrides(&params, &config)
+	if len(config.specSynthRates) > 0 {
+		cRates := make([]C.double, len(config.specSynthRates))
+		for i, rate := range config.specSynthRates {
+			cRates[i] = C.double(rate)
+		}
+		params.spec_synth_rates = &cRates[0]
+	}
 
 	// Create context
 	ctxPtr := C.llama_wrapper_context_create(modelPtr, params)

@@ -17,6 +17,7 @@
 #include <vector>
 #include <memory>
 #include <functional>
+#include <random>
 #include <cstring>
 
 // CUDA backend header for GPU info
@@ -441,6 +442,9 @@ void* llama_wrapper_context_create(void* model, llama_wrapper_model_params param
             common_params_speculative spec_params;
             spec_params.types         = { params.mtp ? COMMON_SPECULATIVE_TYPE_DRAFT_MTP : COMMON_SPECULATIVE_TYPE_DRAFT_SIMPLE };
             spec_params.draft.n_max   = ctx_wrapper->n_draft;
+            if (params.n_spec_synth_rates > 0) {
+                spec_params.synth_rates.assign(params.spec_synth_rates, params.spec_synth_rates + params.n_spec_synth_rates);
+            }
             spec_params.draft.ctx_tgt = ctx_wrapper->ctx;
             spec_params.draft.ctx_dft = ctx_wrapper->draft->ctx;
             ctx_wrapper->spec = common_speculative_init(spec_params, 1);
@@ -578,6 +582,35 @@ static common_params_sampling make_sampling_params(const llama_wrapper_generate_
 
     apply_chat_session_sampling(sampling_params, model, params.chat_session, params.reasoning_budget);
     return sampling_params;
+}
+
+// Verify drafted tokens with synthetic acceptance, as the server does for
+// benchmarking: each drafted token is accepted at random with its rate
+// instead of by matching the target. With rates of 0 every drafted token is
+// rejected and the target's own token kept, so output stays valid while
+// every step rolls back.
+static llama_tokens sample_and_accept_synth(common_sampler * smpl, llama_context * ctx, const llama_tokens & draft,
+                                            const std::vector<double> & synth_probs, std::mt19937 & rng) {
+    llama_tokens result;
+    const llama_vocab * vocab = llama_model_get_vocab(llama_get_model(ctx));
+    std::uniform_real_distribution<double> dist(0.0, 1.0);
+    for (size_t i = 0; i < draft.size(); ++i) {
+        const llama_token id = common_sampler_sample(smpl, ctx, (int)i);
+        // a drafted end-of-generation token would end generation early
+        if (dist(rng) < synth_probs[i] && !llama_vocab_is_eog(vocab, draft[i])) {
+            // synthetic draft tokens don't advance grammar or reasoning state
+            common_sampler_accept(smpl, draft[i], false);
+            result.push_back(draft[i]);
+            continue;
+        }
+        common_sampler_accept(smpl, id, true);
+        result.push_back(id);
+        return result;
+    }
+    const llama_token id = common_sampler_sample(smpl, ctx, (int)draft.size());
+    common_sampler_accept(smpl, id, true);
+    result.push_back(id);
+    return result;
 }
 
 // Decodes one batch of at most n_batch entries into a context
@@ -828,6 +861,11 @@ char* llama_wrapper_generate_with_tokens(void* ctx, const int* tokens, int n_tok
             common_speculative_begin(spec, 0, history);
         }
 
+        // Synthetic acceptance, if configured, seeded like the server's
+        static const std::vector<double> no_synth;
+        const std::vector<double> & synth_probs = spec ? common_speculative_get_synth_probs(spec) : no_synth;
+        std::mt19937 synth_rng(common_sampler_get_seed(sampler.get()));
+
         // A draft context that can't be trimmed is restored to before each
         // step: after drafting, and after rejected drafted tokens
         const bool draft_ckpt = spec && step_needs_checkpoint(draft, wrapper->n_draft + 1);
@@ -879,7 +917,9 @@ char* llama_wrapper_generate_with_tokens(void* ctx, const int* tokens, int n_tok
 
             // The target keeps the drafted tokens it agrees with, then samples
             // its own next token
-            const llama_tokens accepted = common_sampler_sample_and_accept_n(sampler.get(), wrapper->ctx, drafted);
+            const llama_tokens accepted = synth_probs.empty()
+                ? common_sampler_sample_and_accept_n(sampler.get(), wrapper->ctx, drafted)
+                : sample_and_accept_synth(sampler.get(), wrapper->ctx, drafted, synth_probs, synth_rng);
             const size_t n_accepted = accepted.size() - 1;
             if (spec && !drafted.empty()) {
                 common_speculative_accept(spec, 0, (uint16_t)n_accepted);

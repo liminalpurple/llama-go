@@ -36,6 +36,8 @@ typedef struct {
     void* draft_model;     // Draft model for speculative decoding (NULL = none)
     bool mtp;              // Speculate with an MTP head: draft_model, or the model's built-in head
     int n_draft;           // Maximum drafted tokens per step; 0 = default
+    const double* spec_synth_rates; // Synthetic acceptance rates, one per drafted token (testing only)
+    int n_spec_synth_rates;
     bool load_mtp;         // Load the model's built-in MTP head, if it has one
     const char* main_gpu;   // Main GPU
     const char* tensor_split; // Tensor split

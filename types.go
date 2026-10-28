@@ -19,12 +19,14 @@ type contextConfig struct {
 
 	// Speculative decoding: at most one of a draft model, the model's own
 	// MTP head, or a separate MTP head
-	draftModel  *Model
-	mtp         bool
-	mtpModel    *Model
-	draftTokens int    // Maximum drafted tokens per step (default: 3)
-	kvCacheType string // KV cache quantization type: "f16", "q8_0", "q4_0" (default: "q8_0")
-	flashAttn   string // Flash Attention mode: "auto", "enabled", "disabled" (default: "auto")
+	draftModel *Model
+	mtp        bool
+	mtpModel   *Model
+	// Synthetic acceptance rates for testing rollback, see withSyntheticAcceptance
+	specSynthRates []float64
+	draftTokens    int    // Maximum drafted tokens per step (default: 3)
+	kvCacheType    string // KV cache quantization type: "f16", "q8_0", "q4_0" (default: "q8_0")
+	flashAttn      string // Flash Attention mode: "auto", "enabled", "disabled" (default: "auto")
 
 	// RoPE/YaRN overrides; empty or nil means use the model's own value
 	ropeScaling    string

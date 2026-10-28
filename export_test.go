@@ -17,3 +17,7 @@ func ParseChatOutput(m *Model, messages []ChatMessage, opts ChatOptions, chunks 
 	}
 	return content, reasoningContent, nil
 }
+
+// WithSyntheticAcceptance exposes withSyntheticAcceptance to the tests, which
+// use rates of 0 to reject every drafted token so each step rolls back
+var WithSyntheticAcceptance = withSyntheticAcceptance

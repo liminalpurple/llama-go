@@ -11,15 +11,20 @@ import (
 	"github.com/tcpipuk/llama-go"
 )
 
-// The chat model drafts for itself here, so at temperature 0 the target
-// accepts nearly every drafted token and output should match plain
-// generation. llama.cpp doesn't promise bit-identical logits across batch
-// shapes, and speculation verifies several tokens per batch where plain
-// generation decodes one, so a prompt where two tokens are almost tied can
-// differ. Recurrent layers such as Qwen3.5's use a different kernel for each,
-// which makes this likelier there.
+// speculationPrompt continues the same way however it's computed. Speculation
+// verifies several tokens per batch where plain generation decodes one, and
+// with quantised weights each batch width takes a different CUDA kernel that
+// rounds differently, so a prompt where two tokens are nearly tied (such as a
+// list of capitals) can continue differently. Counting gives every kernel the
+// same answer, so speculation must match plain generation exactly, as long as
+// the model can't choose to stop: an instruct model's end-of-turn token can be
+// nearly tied with carrying on, so comparisons ignore EOS.
+const speculationPrompt = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10,"
+
+// The chat model drafts for itself here, so the target accepts nearly every
+// drafted token unless the test rejects them
 var _ = Describe("Speculative decoding", Label("speculative"), func() {
-	const prompt = "The capital of France is Paris. The capital of Germany is"
+	const prompt = speculationPrompt
 
 	var (
 		targetModel *llama.Model
@@ -109,25 +114,33 @@ var _ = Describe("Speculative decoding", Label("speculative"), func() {
 
 		It("should cap draft tokens below the batch size", Label("integration"), func() {
 			ctx = newDraftContext(llama.WithBatch(8), llama.WithDraftTokens(64))
-			result, err := ctx.Generate(prompt, llama.WithTemperature(0), llama.WithMaxTokens(20))
+			result, err := ctx.Generate(prompt, llama.WithTemperature(0), llama.WithMaxTokens(20), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result).To(Equal(generatePlain(prompt, llama.WithTemperature(0), llama.WithMaxTokens(20))))
+			Expect(result).To(Equal(generatePlain(prompt, llama.WithTemperature(0), llama.WithMaxTokens(20), llama.WithIgnoreEOS(true))))
 		})
 	})
 
 	Context("generating", func() {
 		It("should match generation without a draft model", Label("integration"), func() {
 			ctx = newDraftContext()
-			result, err := ctx.Generate(prompt, llama.WithTemperature(0), llama.WithMaxTokens(40))
+			result, err := ctx.Generate(prompt, llama.WithTemperature(0), llama.WithMaxTokens(40), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result).To(Equal(generatePlain(prompt, llama.WithTemperature(0), llama.WithMaxTokens(40))))
+			Expect(result).To(Equal(generatePlain(prompt, llama.WithTemperature(0), llama.WithMaxTokens(40), llama.WithIgnoreEOS(true))))
+		})
+
+		It("should match generation without a draft model when every draft is rejected", Label("integration"), func() {
+			// Rejecting every drafted token rolls back on every step
+			ctx = newDraftContext(llama.WithSyntheticAcceptance(0, 0, 0))
+			result, err := ctx.Generate(prompt, llama.WithTemperature(0), llama.WithMaxTokens(40), llama.WithIgnoreEOS(true))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(generatePlain(prompt, llama.WithTemperature(0), llama.WithMaxTokens(40), llama.WithIgnoreEOS(true))))
 		})
 
 		It("should match generation without a draft model for one draft token", Label("integration"), func() {
 			ctx = newDraftContext(llama.WithDraftTokens(1))
-			result, err := ctx.Generate(prompt, llama.WithTemperature(0), llama.WithMaxTokens(40))
+			result, err := ctx.Generate(prompt, llama.WithTemperature(0), llama.WithMaxTokens(40), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result).To(Equal(generatePlain(prompt, llama.WithTemperature(0), llama.WithMaxTokens(40))))
+			Expect(result).To(Equal(generatePlain(prompt, llama.WithTemperature(0), llama.WithMaxTokens(40), llama.WithIgnoreEOS(true))))
 		})
 
 		It("should stop after max tokens", Label("integration"), func() {
@@ -136,7 +149,7 @@ var _ = Describe("Speculative decoding", Label("speculative"), func() {
 			err := ctx.GenerateStream("Count from one to one hundred: one, two, three,", func(string) bool {
 				tokens++
 				return true
-			}, llama.WithTemperature(0), llama.WithMaxTokens(5))
+			}, llama.WithTemperature(0), llama.WithMaxTokens(5), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(tokens).To(Equal(5))
 		})
@@ -144,7 +157,7 @@ var _ = Describe("Speculative decoding", Label("speculative"), func() {
 		It("should stop at a stop word", Label("integration"), func() {
 			ctx = newDraftContext()
 			result, err := ctx.Generate("The quick brown fox jumps",
-				llama.WithTemperature(0), llama.WithMaxTokens(100), llama.WithStopWords("over"))
+				llama.WithTemperature(0), llama.WithMaxTokens(100), llama.WithIgnoreEOS(true), llama.WithStopWords("over"))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(ContainSubstring("over"))
 			Expect(len(result)).To(BeNumerically("<", 50))
@@ -164,13 +177,13 @@ var _ = Describe("Speculative decoding", Label("speculative"), func() {
 		It("should stream through a channel", Label("integration"), func() {
 			ctx = newDraftContext()
 			tokens, errs := ctx.GenerateChannel(context.Background(), prompt,
-				llama.WithTemperature(0), llama.WithMaxTokens(40))
+				llama.WithTemperature(0), llama.WithMaxTokens(40), llama.WithIgnoreEOS(true))
 			var streamed strings.Builder
 			for token := range tokens {
 				streamed.WriteString(token)
 			}
 			Expect(<-errs).NotTo(HaveOccurred())
-			Expect(streamed.String()).To(Equal(generatePlain(prompt, llama.WithTemperature(0), llama.WithMaxTokens(40))))
+			Expect(streamed.String()).To(Equal(generatePlain(prompt, llama.WithTemperature(0), llama.WithMaxTokens(40), llama.WithIgnoreEOS(true))))
 		})
 
 		It("should give the same output for the same seed", Label("integration"), func() {
@@ -184,13 +197,13 @@ var _ = Describe("Speculative decoding", Label("speculative"), func() {
 
 		It("should match generation without a draft model after reusing the cache", Label("integration"), func() {
 			ctx = newDraftContext()
-			_, err := ctx.Generate(prompt+" Berlin. The capital of Italy is",
-				llama.WithTemperature(0), llama.WithMaxTokens(20))
+			_, err := ctx.Generate(prompt+" 11, 12, 13, 14, 15,",
+				llama.WithTemperature(0), llama.WithMaxTokens(20), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
 
-			result, err := ctx.Generate(prompt, llama.WithTemperature(0), llama.WithMaxTokens(40))
+			result, err := ctx.Generate(prompt, llama.WithTemperature(0), llama.WithMaxTokens(40), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result).To(Equal(generatePlain(prompt, llama.WithTemperature(0), llama.WithMaxTokens(40))))
+			Expect(result).To(Equal(generatePlain(prompt, llama.WithTemperature(0), llama.WithMaxTokens(40), llama.WithIgnoreEOS(true))))
 		})
 
 		It("should speculate in chat", Label("integration", "chat"), func() {
@@ -222,11 +235,11 @@ var _ = Describe("Speculative decoding", Label("speculative"), func() {
 	})
 })
 
-// MTP output can differ from plain generation at near-ties, as on Qwen3.5
-// with self-speculation: verifying several tokens per batch picks between
-// them differently. So these tests check MTP against itself.
-func describeMTPGeneration(newContext func(opts ...llama.ContextOption) *llama.Context) {
-	const prompt = "The capital of France is Paris. The capital of Germany is"
+// The MTP head is a different, weaker model than its target, so it drafts
+// tokens the target rejects; these tests check output against itself, and
+// against plain generation when every drafted token is rejected.
+func describeMTPGeneration(newContext, newPlainContext func(opts ...llama.ContextOption) *llama.Context) {
+	const prompt = speculationPrompt
 
 	Context("generating", func() {
 		var ctx *llama.Context
@@ -250,17 +263,29 @@ func describeMTPGeneration(newContext func(opts ...llama.ContextOption) *llama.C
 
 		It("should match a fresh context after reusing the cache", Label("integration"), func() {
 			ctx = newContext()
-			_, err := ctx.Generate(prompt+" Berlin. The capital of Italy is",
-				llama.WithTemperature(0), llama.WithMaxTokens(20))
+			_, err := ctx.Generate(prompt+" 11, 12, 13, 14, 15,",
+				llama.WithTemperature(0), llama.WithMaxTokens(20), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
-			reused, err := ctx.Generate(prompt, llama.WithTemperature(0), llama.WithMaxTokens(40))
+			reused, err := ctx.Generate(prompt, llama.WithTemperature(0), llama.WithMaxTokens(40), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
 
 			fresh := newContext()
 			defer func() { Expect(fresh.Close()).To(Succeed()) }()
-			expected, err := fresh.Generate(prompt, llama.WithTemperature(0), llama.WithMaxTokens(40))
+			expected, err := fresh.Generate(prompt, llama.WithTemperature(0), llama.WithMaxTokens(40), llama.WithIgnoreEOS(true))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(reused).To(Equal(expected))
+		})
+
+		It("should match plain generation when every draft is rejected", Label("integration"), func() {
+			ctx = newContext(llama.WithDraftTokens(3), llama.WithSyntheticAcceptance(0, 0, 0))
+			result, err := ctx.Generate(prompt, llama.WithTemperature(0), llama.WithMaxTokens(40), llama.WithIgnoreEOS(true))
+			Expect(err).NotTo(HaveOccurred())
+
+			plain := newPlainContext()
+			defer func() { Expect(plain.Close()).To(Succeed()) }()
+			expected, err := plain.Generate(prompt, llama.WithTemperature(0), llama.WithMaxTokens(40), llama.WithIgnoreEOS(true))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(expected))
 		})
 
 		It("should stop after max tokens", Label("integration"), func() {
@@ -344,6 +369,10 @@ var _ = Describe("MTP with a built-in head", Label("speculative", "mtp"), func()
 		c, err := model.NewContext(append([]llama.ContextOption{llama.WithContext(2048), llama.WithMTP()}, opts...)...)
 		Expect(err).NotTo(HaveOccurred())
 		return c
+	}, func(opts ...llama.ContextOption) *llama.Context {
+		c, err := model.NewContext(append([]llama.ContextOption{llama.WithContext(2048)}, opts...)...)
+		Expect(err).NotTo(HaveOccurred())
+		return c
 	})
 })
 
@@ -400,6 +429,10 @@ var _ = Describe("MTP with a separate head", Label("speculative", "mtp"), func()
 
 	describeMTPGeneration(func(opts ...llama.ContextOption) *llama.Context {
 		c, err := model.NewContext(append([]llama.ContextOption{llama.WithContext(2048), llama.WithMTPModel(head)}, opts...)...)
+		Expect(err).NotTo(HaveOccurred())
+		return c
+	}, func(opts ...llama.ContextOption) *llama.Context {
+		c, err := model.NewContext(append([]llama.ContextOption{llama.WithContext(2048)}, opts...)...)
 		Expect(err).NotTo(HaveOccurred())
 		return c
 	})

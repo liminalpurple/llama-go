@@ -384,6 +384,18 @@ func WithMTPModel(head *Model) ContextOption {
 	}
 }
 
+// withSyntheticAcceptance makes speculative decoding accept each drafted
+// token at random with the rate for its position instead of by matching the
+// target, as llama.cpp's server does for benchmarking. Rates must be
+// non-increasing, one per drafted token. Only rates of 0 keep the output
+// valid, rejecting every drafted token so each step rolls back, which is what
+// the tests use it for.
+func withSyntheticAcceptance(rates ...float64) ContextOption {
+	return func(c *contextConfig) {
+		c.specSynthRates = rates
+	}
+}
+
 // WithDraftTokens sets the most tokens the draft model proposes per step.
 //
 // Higher values speed up text the draft predicts well, but waste more work
