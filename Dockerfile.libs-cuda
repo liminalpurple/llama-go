@@ -23,4 +23,6 @@ COPY libggml.a                     /libs/
 COPY libggml-base.a                /libs/
 COPY libggml-cpu.a                 /libs/
 COPY libggml-cuda.a                /libs/
+COPY libmtmd.a                     /libs/
+COPY libvendor-hash.a              /libs/
 COPY wrapper.h                     /headers/

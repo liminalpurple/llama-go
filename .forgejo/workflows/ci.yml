@@ -150,6 +150,8 @@ jobs:
             libggml-base.a
             libggml-cpu.a
             libggml-cuda.a
+            libmtmd.a
+            libvendor-hash.a
             wrapper.h
           retention-days: 1
 

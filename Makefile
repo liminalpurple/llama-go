@@ -218,9 +218,9 @@ endif
 # Note llama-common-base is a separate static archive that holds llama_build_*
 # symbols (build-info.cpp). In shared mode it gets folded into libllama-common.so,
 # but in static mode it must be linked separately.
-COMMON_STATIC_LIBS = build/common/libllama-common.a build/common/libllama-common-base.a build/src/libllama.a build/ggml/src/libggml.a build/ggml/src/libggml-base.a build/ggml/src/libggml-cpu.a
-COMMON_SHARED_LIBS = build/bin/libllama-common.so build/bin/libllama.so build/bin/libggml.so build/bin/libggml-base.so build/bin/libggml-cpu.so
-COMMON_SHARED_BASENAMES = libllama-common.so libllama.so libggml.so libggml-base.so libggml-cpu.so
+COMMON_STATIC_LIBS = build/common/libllama-common.a build/common/libllama-common-base.a build/src/libllama.a build/ggml/src/libggml.a build/ggml/src/libggml-base.a build/ggml/src/libggml-cpu.a build/tools/mtmd/libmtmd.a build/vendor/hash/libvendor-hash.a
+COMMON_SHARED_LIBS = build/bin/libllama-common.so build/bin/libllama.so build/bin/libggml.so build/bin/libggml-base.so build/bin/libggml-cpu.so build/bin/libmtmd.so
+COMMON_SHARED_BASENAMES = libllama-common.so libllama.so libggml.so libggml-base.so libggml-cpu.so libmtmd.so
 
 # TODO: support Windows
 ifeq ($(GPU_TESTS),true)
@@ -264,7 +264,7 @@ FORCE:
 
 llama.cpp/ggml.o: FORCE
 	mkdir -p build
-	cd build && CC="$(CC)" CXX="$(CXX)" cmake ../llama.cpp $(CMAKE_ARGS) -DLLAMA_CURL=OFF && VERBOSE=1 cmake --build . --config Release --target ggml llama && cp -rf ggml/src/CMakeFiles/ggml-base.dir/ggml.c.o ../llama.cpp/ggml.o
+	cd build && CC="$(CC)" CXX="$(CXX)" cmake ../llama.cpp $(CMAKE_ARGS) -DLLAMA_CURL=OFF && VERBOSE=1 cmake --build . --config Release --target ggml llama mtmd && cp -rf ggml/src/CMakeFiles/ggml-base.dir/ggml.c.o ../llama.cpp/ggml.o
 
 llama.cpp/ggml-cuda.o: llama.cpp/ggml.o
 	cd build && cp -rf "$(GGML_CUDA_OBJ_PATH)" ../llama.cpp/ggml-cuda.o
@@ -323,6 +323,8 @@ vendor-headers cgo_headers/.vendored:
 	cd llama.cpp && find include ggml/include common \
 	  \( -name '*.h' -o -name '*.hpp' -o -name '*.inl' \) -print0 | \
 	  tar --null --files-from=- -cf - | tar -xf - -C ../cgo_headers/llama.cpp
+	# mtmd's public headers, for media input
+	cd llama.cpp && tar -cf - tools/mtmd/mtmd.h tools/mtmd/mtmd-helper.h | tar -xf - -C ../cgo_headers/llama.cpp
 	cd llama.cpp/vendor && find . \
 	  \( -name '*.h' -o -name '*.hpp' -o -name '*.inl' \) -print0 | \
 	  tar --null --files-from=- -cf - | tar -xf - -C ../../cgo_headers/llama.cpp/thirdparty
