@@ -59,6 +59,34 @@ var _ = Describe("Model Loading Errors", func() {
 			}
 		})
 
+		It("should give llama.cpp's reason for a file that isn't a model", Label("unit"), func() {
+			path := GinkgoT().TempDir() + "/not-a-model.gguf"
+			Expect(os.WriteFile(path, []byte("this is not a GGUF file"), 0o600)).To(Succeed())
+
+			model, err := llama.LoadModel(path)
+			Expect(err).To(HaveOccurred())
+			Expect(model).To(BeNil())
+			Expect(err.Error()).To(ContainSubstring("Failed to load model from: " + path + ": "))
+			Expect(err.Error()).To(ContainSubstring("invalid magic characters"))
+		})
+
+		It("should give llama.cpp's reason when context creation fails", Label("integration"), func() {
+			modelPath := os.Getenv("TEST_MOE_MODEL")
+			if modelPath == "" {
+				Skip("TEST_MOE_MODEL not set - skipping integration test")
+			}
+			model, err := llama.LoadModel(modelPath)
+			Expect(err).NotTo(HaveOccurred())
+			defer func() { Expect(model.Close()).To(Succeed()) }()
+
+			// The default q8_0 cache stores blocks of 32, which its 48-wide heads cannot hold
+			ctx, err := model.NewContext(llama.WithContext(256))
+			Expect(err).To(HaveOccurred())
+			Expect(ctx).To(BeNil())
+			Expect(err.Error()).To(ContainSubstring("Failed to create context: "))
+			Expect(err.Error()).To(ContainSubstring("does not divide n_embd_head_k=48"))
+		})
+
 		It("should return 'Exception loading model:' for C++ exceptions", Label("integration"), func() {
 			// This test documents the exception error format
 			// Actual exceptions are difficult to trigger without corrupted model files

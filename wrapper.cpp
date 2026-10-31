@@ -35,8 +35,49 @@ static std::string g_last_error;
 // Global log level control
 static ggml_log_level g_min_log_level = GGML_LOG_LEVEL_INFO;
 
+// llama.cpp logs why a call failed just before returning null, on the calling thread, so
+// error-level lines are kept while a log_capture is open and added to the error we report.
+// This happens whatever LLAMA_LOG says, as it only decides what is printed
+static thread_local bool g_log_capturing = false;
+static thread_local std::string g_log_captured;
+static thread_local ggml_log_level g_log_prev_level = GGML_LOG_LEVEL_NONE;
+
+struct log_capture {
+    log_capture() {
+        g_log_captured.clear();
+        g_log_capturing = true;
+    }
+    ~log_capture() {
+        g_log_capturing = false;
+    }
+
+    // The message followed by what llama.cpp logged, if it logged anything
+    std::string explain(const std::string& message) const {
+        std::string reason;
+        size_t start = 0;
+        while (start < g_log_captured.size()) {
+            size_t end = g_log_captured.find('\n', start);
+            if (end == std::string::npos) end = g_log_captured.size();
+            std::string line = g_log_captured.substr(start, end - start);
+            if (!line.empty()) {
+                reason += (reason.empty() ? "" : "; ") + line;
+            }
+            start = end + 1;
+        }
+        return reason.empty() ? message : message + ": " + reason;
+    }
+};
+
 // Log callback that respects LLAMA_LOG environment variable
 static void llama_log_callback(ggml_log_level level, const char * text, void * /*user_data*/) {
+    // A continuation belongs to the level of the line it continues
+    const ggml_log_level effective = level == GGML_LOG_LEVEL_CONT ? g_log_prev_level : level;
+    if (level != GGML_LOG_LEVEL_CONT) {
+        g_log_prev_level = level;
+    }
+    if (g_log_capturing && effective == GGML_LOG_LEVEL_ERROR && g_log_captured.size() < 4096) {
+        g_log_captured += text;
+    }
     if (level >= g_min_log_level) {
         fprintf(stderr, "%s", text);
     }
@@ -106,6 +147,7 @@ void llama_wrapper_init_logging() {
         }
     }
     llama_log_set(llama_log_callback, nullptr);
+    mtmd_helper_log_set(llama_log_callback, nullptr);
 }
 
 // Forward declarations of Go callback functions
@@ -411,6 +453,7 @@ void* llama_wrapper_model_load(const char* model_path, llama_wrapper_model_param
         return nullptr;
     }
 
+    log_capture capture;
     try {
         // Initialize llama backend
         llama_backend_init();
@@ -482,7 +525,7 @@ void* llama_wrapper_model_load(const char* model_path, llama_wrapper_model_param
 
         llama_model* model = llama_model_load_from_file(model_path, model_params);
         if (!model) {
-            g_last_error = "Failed to load model from: " + std::string(model_path);
+            g_last_error = capture.explain("Failed to load model from: " + std::string(model_path));
             return nullptr;
         }
 
@@ -529,7 +572,7 @@ void* llama_wrapper_model_load(const char* model_path, llama_wrapper_model_param
             if (!wrapper->mtmd) {
                 llama_model_free(model);
                 delete wrapper;
-                g_last_error = "Failed to load multimodal projector from: " + std::string(params.mmproj);
+                g_last_error = capture.explain("Failed to load multimodal projector from: " + std::string(params.mmproj));
                 return nullptr;
             }
         }
@@ -591,6 +634,7 @@ void* llama_wrapper_context_create(void* model, llama_wrapper_model_params param
     }
 
     llama_wrapper_context_t* ctx_wrapper = nullptr;
+    log_capture capture;
     try {
         auto model_wrapper = static_cast<llama_wrapper_model_t*>(model);
         auto ctx_params = convert_context_params(params);
@@ -645,7 +689,7 @@ void* llama_wrapper_context_create(void* model, llama_wrapper_model_params param
 
         ctx_wrapper = create_context(model_wrapper->model, ctx_params, decision_type != COMMON_DECISION_TYPE_NONE);
         if (!ctx_wrapper) {
-            g_last_error = "Failed to create context";
+            g_last_error = capture.explain("Failed to create context");
             return nullptr;
         }
         ctx_wrapper->mtmd = model_wrapper->mtmd;
