@@ -137,9 +137,11 @@ func WithMainGPU(gpu string) ModelOption {
 // WithTensorSplit configures tensor distribution across multiple GPUs.
 //
 // Allows manual control of how model layers are distributed across GPUs in
-// multi-GPU setups. The split string format is backend-specific (e.g.
-// "0.7,0.3" for CUDA to use 70% on GPU 0, 30% on GPU 1). Most users should
-// rely on automatic distribution instead.
+// multi-GPU setups. The split is a list of non-negative proportions, one per
+// device in order, separated by ',' or '/' as in llama.cpp's --tensor-split
+// (e.g. "0.7,0.3" puts 70% on the first GPU and 30% on the second). Loading
+// fails if the split is malformed or names more devices than llama.cpp
+// supports. Most users should rely on automatic distribution instead.
 //
 // Default: "" (automatic distribution)
 //

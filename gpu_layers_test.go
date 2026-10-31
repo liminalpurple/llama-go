@@ -335,4 +335,31 @@ var _ = Describe("GPU Layer Configuration", Label("gpu-layers"), func() {
 		})
 
 	})
+
+	Context("tensor split", func() {
+		It("should load with a split naming one device", Label("integration", "gpu"), func() {
+			var err error
+			model, err = llama.LoadModel(modelPath, llama.WithTensorSplit("1"))
+			Expect(err).NotTo(HaveOccurred())
+
+			ctx, err = model.NewContext(llama.WithContext(2048))
+			Expect(err).NotTo(HaveOccurred())
+
+			result, err := ctx.Generate("Test",
+				llama.WithMaxTokens(5),
+				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).NotTo(BeEmpty())
+		})
+
+		It("should reject a malformed split", Label("integration"), func() {
+			for _, split := range []string{"0.6,", "abc", "0.5,-1", "1,,1", "0.5x"} {
+				m, err := llama.LoadModel(modelPath, llama.WithTensorSplit(split))
+				Expect(err).To(HaveOccurred(), "split %q", split)
+				Expect(err.Error()).To(ContainSubstring("tensor split"), "split %q", split)
+				Expect(m).To(BeNil())
+			}
+		})
+	})
 })

@@ -416,6 +416,37 @@ void* llama_wrapper_model_load(const char* model_path, llama_wrapper_model_param
 
         // Load model (weights only)
         auto model_params = convert_model_params(params);
+
+        // Proportions per device, separated by ',' or '/' as in llama.cpp's --tensor-split.
+        // The model copies the array, so it only needs to outlive the load
+        std::vector<float> tensor_split(llama_max_devices(), 0.0f);
+        if (params.tensor_split && params.tensor_split[0] != '\0') {
+            const std::string split = params.tensor_split;
+            size_t n = 0;
+            for (size_t start = 0; start <= split.size();) {
+                size_t end = split.find_first_of(",/", start);
+                if (end == std::string::npos) end = split.size();
+                const std::string part = split.substr(start, end - start);
+                if (n >= tensor_split.size()) {
+                    g_last_error = "Tensor split names more than " + std::to_string(tensor_split.size()) + " devices";
+                    return nullptr;
+                }
+                size_t used = 0;
+                float value = -1.0f;
+                try {
+                    value = std::stof(part, &used);
+                } catch (const std::exception&) {
+                }
+                if (part.empty() || used != part.size() || !(value >= 0.0f)) {
+                    g_last_error = "Invalid tensor split \"" + split + "\": each part must be a non-negative number";
+                    return nullptr;
+                }
+                tensor_split[n++] = value;
+                start = end + 1;
+            }
+            model_params.tensor_split = tensor_split.data();
+        }
+
         llama_model* model = llama_model_load_from_file(model_path, model_params);
         if (!model) {
             g_last_error = "Failed to load model from: " + std::string(model_path);
