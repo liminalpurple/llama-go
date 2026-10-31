@@ -223,14 +223,16 @@ func LoadModel(path string, opts ...ModelOption) (*Model, error) {
 	}
 
 	// Load model (weights only)
-	modelPtr := C.llama_wrapper_model_load(cPath, params)
+	modelPtr, errMsg := withLastError(func() unsafe.Pointer {
+		return C.llama_wrapper_model_load(cPath, params)
+	})
 	runtime.KeepAlive(idPtr)
 	if modelPtr == nil {
 		// Clean up callback registry on failure
 		if callbackID != 0 {
 			progressCallbackRegistry.Delete(callbackID)
 		}
-		return nil, fmt.Errorf("failed to load model: %s", C.GoString(C.llama_wrapper_last_error()))
+		return nil, fmt.Errorf("failed to load model: %s", errMsg)
 	}
 
 	model := &Model{
@@ -396,9 +398,11 @@ func (m *Model) NewContext(opts ...ContextOption) (*Context, error) {
 	}
 
 	// Create context
-	ctxPtr := C.llama_wrapper_context_create(modelPtr, params)
+	ctxPtr, errMsg := withLastError(func() unsafe.Pointer {
+		return C.llama_wrapper_context_create(modelPtr, params)
+	})
 	if ctxPtr == nil {
-		return nil, fmt.Errorf("failed to create context: %s", C.GoString(C.llama_wrapper_last_error()))
+		return nil, fmt.Errorf("failed to create context: %s", errMsg)
 	}
 
 	ctx := &Context{
@@ -594,13 +598,16 @@ func (m *Model) SupportsThinking() (bool, error) {
 		return false, fmt.Errorf("model is closed")
 	}
 
-	switch C.llama_wrapper_chat_templates_support_thinking(templates) {
+	support, errMsg := withLastError(func() C.int {
+		return C.llama_wrapper_chat_templates_support_thinking(templates)
+	})
+	switch support {
 	case 1:
 		return true, nil
 	case 0:
 		return false, nil
 	default:
-		return false, fmt.Errorf("%s", C.GoString(C.llama_wrapper_last_error()))
+		return false, fmt.Errorf("%s", errMsg)
 	}
 }
 
@@ -613,10 +620,13 @@ func (m *Model) getChatTemplates() (unsafe.Pointer, error) {
 		return nil, fmt.Errorf("model is closed")
 	}
 	if m.chatTemplates == nil {
-		m.chatTemplates = C.llama_wrapper_chat_templates_init(m.modelPtr, nil)
-		if m.chatTemplates == nil {
-			return nil, fmt.Errorf("failed to load chat template: %s", C.GoString(C.llama_wrapper_last_error()))
+		templates, errMsg := withLastError(func() unsafe.Pointer {
+			return C.llama_wrapper_chat_templates_init(m.modelPtr, nil)
+		})
+		if templates == nil {
+			return nil, fmt.Errorf("failed to load chat template: %s", errMsg)
 		}
+		m.chatTemplates = templates
 	}
 
 	return m.chatTemplates, nil

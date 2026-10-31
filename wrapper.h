@@ -176,7 +176,10 @@ int llama_wrapper_embeddings_batch(void* ctx, const char** texts, int n_texts, f
 // Utility functions
 void llama_wrapper_free_result(char* result);
 int llama_wrapper_dry_max_seq_breakers(void);  // LLAMA_DRY_MAX_SEQ_BREAKERS
+// The message for the last failure on the calling thread. Go must read it on the thread that
+// made the failing call, so it goes through withLastError, which also clears it first
 const char* llama_wrapper_last_error();
+void llama_wrapper_clear_last_error();
 int llama_wrapper_get_cached_token_count(void* ctx);
 
 // Get model's native maximum context length

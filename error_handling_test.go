@@ -1,8 +1,10 @@
 package llama_test
 
 import (
+	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -120,6 +122,24 @@ var _ = Describe("Model Loading Errors", func() {
 			model, err = llama.LoadModel("/nonexistent/path.gguf")
 			Expect(err).To(HaveOccurred())
 			Expect(model).To(BeNil())
+		})
+
+		It("should report each goroutine's own error when several fail at once", Label("unit"), func() {
+			var wg sync.WaitGroup
+			for g := range 8 {
+				wg.Add(1)
+				go func() {
+					defer GinkgoRecover()
+					defer wg.Done()
+					path := fmt.Sprintf("/nonexistent/goroutine-%d.gguf", g)
+					for range 50 {
+						model, err := llama.LoadModel(path)
+						Expect(model).To(BeNil())
+						Expect(err).To(MatchError(ContainSubstring(path + ":")))
+					}
+				}()
+			}
+			wg.Wait()
 		})
 	})
 })

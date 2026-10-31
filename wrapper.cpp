@@ -29,8 +29,8 @@
 #include "llama.cpp/ggml/include/ggml-cuda.h"
 #endif
 
-// Global error handling
-static std::string g_last_error;
+// Error message for the last failure, per thread so concurrent failures can't overwrite it
+static thread_local std::string g_last_error;
 
 // Global log level control
 static ggml_log_level g_min_log_level = GGML_LOG_LEVEL_INFO;
@@ -330,6 +330,10 @@ void llama_wrapper_context_free(void* ctx);
 
 const char* llama_wrapper_last_error() {
     return g_last_error.c_str();
+}
+
+void llama_wrapper_clear_last_error() {
+    g_last_error.clear();
 }
 
 void llama_wrapper_free_result(char* result) {

@@ -150,10 +150,12 @@ func (c *Context) Decide(ctx gocontext.Context, req DecisionRequest) (*DecisionR
 		cSizesPtr = &cSizes[0]
 	}
 
-	cResult := C.llama_wrapper_decide(c.contextPtr, cBody, cMediaPtr, cSizesPtr, C.int(len(req.Media)),
-		C.bool(c.config.prefixCaching))
+	cResult, errMsg := withLastError(func() *C.char {
+		return C.llama_wrapper_decide(c.contextPtr, cBody, cMediaPtr, cSizesPtr, C.int(len(req.Media)),
+			C.bool(c.config.prefixCaching))
+	})
 	if cResult == nil {
-		return nil, fmt.Errorf("decision failed: %s", C.GoString(C.llama_wrapper_last_error()))
+		return nil, fmt.Errorf("decision failed: %s", errMsg)
 	}
 	result := C.GoString(cResult)
 	C.llama_wrapper_free_result(cResult)

@@ -98,14 +98,17 @@ func (c *Context) Tokenize(text string) ([]int32, error) {
 	var tokensPtr *C.int
 	var count C.int
 
-	C.llama_wrapper_tokenize_alloc(c.contextPtr, cText, &tokensPtr, &count)
+	_, errMsg := withLastError(func() struct{} {
+		C.llama_wrapper_tokenize_alloc(c.contextPtr, cText, &tokensPtr, &count)
+		return struct{}{}
+	})
 
 	if tokensPtr != nil {
 		defer C.llama_wrapper_free_tokens(tokensPtr)
 	}
 
 	if count < 0 || tokensPtr == nil {
-		return nil, fmt.Errorf("tokenisation failed: %s", C.GoString(C.llama_wrapper_last_error()))
+		return nil, fmt.Errorf("tokenisation failed: %s", errMsg)
 	}
 
 	tokens := (*[1 << 30]C.int)(unsafe.Pointer(tokensPtr))[:count:count]
@@ -135,9 +138,11 @@ func (c *Context) GetCachedTokenCount() (int, error) {
 		return 0, fmt.Errorf("context is closed")
 	}
 
-	count := int(C.llama_wrapper_get_cached_token_count(c.contextPtr))
+	count, errMsg := withLastError(func() int {
+		return int(C.llama_wrapper_get_cached_token_count(c.contextPtr))
+	})
 	if count < 0 {
-		return 0, fmt.Errorf("failed to get cached token count: %s", C.GoString(C.llama_wrapper_last_error()))
+		return 0, fmt.Errorf("failed to get cached token count: %s", errMsg)
 	}
 
 	return count, nil
@@ -177,9 +182,11 @@ func (c *Context) GetEmbeddings(text string) ([]float32, error) {
 
 	embeddings := make([]C.float, nEmbd)
 
-	count := C.llama_wrapper_embeddings(c.contextPtr, cText, &embeddings[0], C.int(nEmbd))
+	count, errMsg := withLastError(func() C.int {
+		return C.llama_wrapper_embeddings(c.contextPtr, cText, &embeddings[0], C.int(nEmbd))
+	})
 	if count < 0 {
-		return nil, fmt.Errorf("embedding generation failed: %s", C.GoString(C.llama_wrapper_last_error()))
+		return nil, fmt.Errorf("embedding generation failed: %s", errMsg)
 	}
 
 	result := make([]float32, count)
@@ -241,16 +248,18 @@ func (c *Context) GetEmbeddingsBatch(texts []string) ([][]float32, error) {
 	outputSize := len(texts) * nEmbd
 	cEmbeddings := make([]C.float, outputSize)
 
-	count := C.llama_wrapper_embeddings_batch(
-		c.contextPtr,
-		(**C.char)(unsafe.Pointer(&cTexts[0])),
-		C.int(len(texts)),
-		&cEmbeddings[0],
-		C.int(nEmbd),
-	)
+	count, errMsg := withLastError(func() C.int {
+		return C.llama_wrapper_embeddings_batch(
+			c.contextPtr,
+			(**C.char)(unsafe.Pointer(&cTexts[0])),
+			C.int(len(texts)),
+			&cEmbeddings[0],
+			C.int(nEmbd),
+		)
+	})
 
 	if count < 0 {
-		return nil, fmt.Errorf("batch embedding generation failed: %s", C.GoString(C.llama_wrapper_last_error()))
+		return nil, fmt.Errorf("batch embedding generation failed: %s", errMsg)
 	}
 
 	if int(count) != len(texts) {
@@ -633,9 +642,11 @@ func (c *Context) generateWithConfig(prompt string, config generateConfig, callb
 	}
 
 	// Call C generation function
-	cResult := C.llama_wrapper_generate(c.contextPtr, params)
+	cResult, errMsg := withLastError(func() *C.char {
+		return C.llama_wrapper_generate(c.contextPtr, params)
+	})
 	if cResult == nil {
-		return "", fmt.Errorf("generation failed: %s", C.GoString(C.llama_wrapper_last_error()))
+		return "", fmt.Errorf("generation failed: %s", errMsg)
 	}
 
 	result := C.GoString(cResult)
@@ -758,16 +769,18 @@ func (c *Context) generateWithTokensAndConfig(tokens []int32, config generateCon
 	}
 
 	// Call C generation function with tokens
-	cResult := C.llama_wrapper_generate_with_tokens(
-		c.contextPtr,
-		&cTokens[0],
-		C.int(len(tokens)),
-		C.int(0), // prefix_len - no prefix caching for this function
-		params,
-	)
+	cResult, errMsg := withLastError(func() *C.char {
+		return C.llama_wrapper_generate_with_tokens(
+			c.contextPtr,
+			&cTokens[0],
+			C.int(len(tokens)),
+			C.int(0), // prefix_len - no prefix caching for this function
+			params,
+		)
+	})
 
 	if cResult == nil {
-		return "", fmt.Errorf("generation with tokens failed: %s", C.GoString(C.llama_wrapper_last_error()))
+		return "", fmt.Errorf("generation with tokens failed: %s", errMsg)
 	}
 
 	result := C.GoString(cResult)

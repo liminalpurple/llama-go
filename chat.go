@@ -51,9 +51,12 @@ func newChatSession(m *Model, messages []ChatMessage, opts ChatOptions, format R
 	if opts.ChatTemplate != "" {
 		cTemplate := C.CString(opts.ChatTemplate)
 		defer C.free(unsafe.Pointer(cTemplate))
-		templates = C.llama_wrapper_chat_templates_init(m.modelPtr, cTemplate)
+		var errMsg string
+		templates, errMsg = withLastError(func() unsafe.Pointer {
+			return C.llama_wrapper_chat_templates_init(m.modelPtr, cTemplate)
+		})
 		if templates == nil {
-			return nil, fmt.Errorf("failed to load chat template: %s", C.GoString(C.llama_wrapper_last_error()))
+			return nil, fmt.Errorf("failed to load chat template: %s", errMsg)
 		}
 		// The session copies what it needs from the templates
 		defer C.llama_wrapper_chat_templates_free(templates)
@@ -108,17 +111,19 @@ func newChatSession(m *Model, messages []ChatMessage, opts ChatOptions, format R
 		}
 	}
 
-	ptr := C.llama_wrapper_chat_session_new(
-		m.modelPtr,
-		templates,
-		(**C.char)(unsafe.Pointer(&cRoles[0])),
-		(**C.char)(unsafe.Pointer(&cContents[0])),
-		C.int(len(messages)),
-		format.toC(),
-		enableThinking,
-	)
+	ptr, errMsg := withLastError(func() unsafe.Pointer {
+		return C.llama_wrapper_chat_session_new(
+			m.modelPtr,
+			templates,
+			(**C.char)(unsafe.Pointer(&cRoles[0])),
+			(**C.char)(unsafe.Pointer(&cContents[0])),
+			C.int(len(messages)),
+			format.toC(),
+			enableThinking,
+		)
+	})
 	if ptr == nil {
-		return nil, fmt.Errorf("failed to apply chat template: %s", C.GoString(C.llama_wrapper_last_error()))
+		return nil, fmt.Errorf("failed to apply chat template: %s", errMsg)
 	}
 
 	return &chatSession{ptr: ptr, media: media}, nil
@@ -135,9 +140,11 @@ func (s *chatSession) feed(text string, final bool) (content, reasoningContent s
 	cText := C.CString(text)
 	defer C.free(unsafe.Pointer(cText))
 
-	result := C.llama_wrapper_chat_session_feed(s.ptr, cText, C.bool(final))
+	result, errMsg := withLastError(func() *C.llama_wrapper_parsed_message {
+		return C.llama_wrapper_chat_session_feed(s.ptr, cText, C.bool(final))
+	})
 	if result == nil {
-		return "", "", fmt.Errorf("failed to parse chat output: %s", C.GoString(C.llama_wrapper_last_error()))
+		return "", "", fmt.Errorf("failed to parse chat output: %s", errMsg)
 	}
 	defer C.llama_wrapper_free_parsed_message(result)
 
