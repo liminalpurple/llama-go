@@ -168,12 +168,21 @@ type modelConfig struct {
 	mmap                    bool
 	mainGPU                 string
 	tensorSplit             string
+	tensorOverrides         []tensorOverride
 	disableProgressCallback bool
 	progressCallback        ProgressCallback
 	mmproj                  string
 	imageMinTokens          int
 	imageMaxTokens          int
 	mtpHead                 bool
+}
+
+// tensorOverride stores tensors matching pattern on device, or with expertLayers set, a
+// model's expert tensors on the CPU: in its first expertLayers layers, or all when -1
+type tensorOverride struct {
+	pattern      string
+	device       string
+	expertLayers int
 }
 
 // Default model configuration

@@ -49,6 +49,8 @@ jobs:
       # enough for its answers about images to be checked
       TEST_DECISION_MODELS: decision-tinyopenjev/tinyopenjev-for-testing-Q8_0.gguf,decision-tinylaya/tinylaya-for-testing-Q8_0.gguf,Kev-0.8B/Kev-0.8B-Q8_0.gguf
       TEST_DECISION_VISION_MODEL: vllm-d3-edge/vllm-d3-edge-Q8_0.gguf
+      # A tiny mixture-of-experts model, for placing expert tensors on chosen devices
+      TEST_MOE_MODEL: stories15M_MOE/stories15M_MOE-F16.gguf
       LLAMA_LOG: error
     steps:
       - name: Checkout code
@@ -123,6 +125,7 @@ jobs:
           fetch Kev-0.8B ggml-org/Kev-0.8B-GGUF Kev-0.8B-Q8_0.gguf
           fetch vllm-d3-edge ggml-org/vllm-d3-edge-GGUF vllm-d3-edge-Q8_0.gguf
           fetch vllm-d3-edge ggml-org/vllm-d3-edge-GGUF mmproj-vllm-d3-edge-Q8_0.gguf
+          fetch stories15M_MOE ggml-org/stories15M_MOE stories15M_MOE-F16.gguf
 
       - name: Compute Go build tags
         id: tags
@@ -148,6 +151,7 @@ jobs:
           TEST_AUDIO_MODEL: ""
           TEST_DECISION_MODELS: ""
           TEST_DECISION_VISION_MODEL: ""
+          TEST_MOE_MODEL: ""
         run: |
           TEST_CHAT_MODEL=$TEST_GEMMA_MODEL go run github.com/onsi/ginkgo/v2/ginkgo -tags '${{ steps.tags.outputs.tags }}' --flake-attempts 3 -v ./...
 

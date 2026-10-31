@@ -310,8 +310,9 @@ when finished, close model when done with weights.
 Options use the functional options pattern, separated into ModelOption and ContextOption.
 
 **Model options** (affect weight loading): `WithGPULayers`, `WithMLock`, `WithMMap`,
-`WithMainGPU`, `WithTensorSplit`, `WithSilentLoading`, `WithProgressCallback`, `WithMTPHead`,
-`WithMMProj`, `WithImageMinTokens`, `WithImageMaxTokens`
+`WithMainGPU`, `WithTensorSplit`, `WithTensorOverride`, `WithCPUMoE`, `WithNCPUMoE`,
+`WithSilentLoading`, `WithProgressCallback`, `WithMTPHead`, `WithMMProj`, `WithImageMinTokens`,
+`WithImageMaxTokens`
 
 **Context options** (affect execution): `WithContext`, `WithBatch`, `WithUBatch`, `WithThreads`,
 `WithThreadsBatch`, `WithF16Memory`, `WithEmbeddings`, `WithKVCacheType`, `WithFlashAttn`,
@@ -603,6 +604,26 @@ for i := 0; i < 100; i++ {
     }(i)
 }
 wg.Wait()
+```
+
+### Placing tensors on devices
+
+`Devices` lists the compute devices llama.cpp can use, on any backend, with their memory.
+`WithTensorOverride` stores the tensors whose names match a regular expression on one of them by
+name, as llama.cpp's `--override-tensor` does; the first matching override wins.
+
+The common case is a mixture-of-experts model that doesn't fit in VRAM. Its experts make up most
+of its size, but each token only uses a few, so keeping them in system memory costs far less speed
+than offloading fewer layers. `WithCPUMoE` does that for every layer, like `--cpu-moe`, and
+`WithNCPUMoE(n)` for the first n layers only, like `--n-cpu-moe`, so the rest can use spare VRAM:
+
+```go
+for _, d := range llama.Devices() {
+    fmt.Printf("%s (%s): %d MiB free\n", d.Name, d.Description, d.FreeMemory>>20)
+}
+
+// Attention, shared weights and the KV cache on the GPU; experts in system memory
+model, err := llama.LoadModel("Qwen3-Omni-30B-A3B-Instruct-Q4_K_M.gguf", llama.WithCPUMoE())
 ```
 
 ### Prefix caching for system prompts

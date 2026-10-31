@@ -157,6 +157,66 @@ func WithTensorSplit(split string) ModelOption {
 	}
 }
 
+// WithTensorOverride stores the tensors whose names match a pattern on a chosen
+// device, as llama.cpp's --override-tensor does.
+//
+// The pattern is a regular expression (ECMAScript syntax) matched against
+// tensor names such as "blk.12.ffn_up_exps.weight". The device is a name from
+// Devices, such as "CPU" or "CUDA0". The option can be given more than once;
+// for each tensor the first matching override wins, in the order the options
+// were given, and tensors matching none are placed as usual. Loading fails if
+// a pattern is invalid or the device doesn't exist.
+//
+// Example:
+//
+//	// Keep the feed-forward weights of the last four layers on the CPU
+//	model, err := llama.LoadModel("model.gguf",
+//	    llama.WithTensorOverride(`blk\.(2[89]|3[01])\.ffn_.*`, "CPU"),
+//	)
+func WithTensorOverride(pattern, device string) ModelOption {
+	return func(c *modelConfig) {
+		c.tensorOverrides = append(c.tensorOverrides, tensorOverride{pattern: pattern, device: device})
+	}
+}
+
+// WithCPUMoE keeps all of a mixture-of-experts model's expert weights in system
+// memory, as llama.cpp's --cpu-moe does.
+//
+// Experts make up most of a MoE model's size, but each token only uses a few
+// of them, so running them on the CPU costs far less speed than offloading
+// fewer layers. The GPU keeps attention, the shared weights and the KV cache.
+// It has no effect on models without experts.
+//
+// Example:
+//
+//	model, err := llama.LoadModel("Qwen3-30B-A3B-Q4_K_M.gguf",
+//	    llama.WithCPUMoE(),
+//	)
+func WithCPUMoE() ModelOption {
+	return func(c *modelConfig) {
+		c.tensorOverrides = append(c.tensorOverrides, tensorOverride{expertLayers: -1})
+	}
+}
+
+// WithNCPUMoE keeps the expert weights of a mixture-of-experts model's first n
+// layers in system memory, as llama.cpp's --n-cpu-moe does, so the experts
+// of the remaining layers can use whatever VRAM is left. Values of n up to 0
+// change nothing.
+//
+// Example:
+//
+//	// Experts of layers 0-19 on the CPU, the rest on the GPU
+//	model, err := llama.LoadModel("Qwen3-30B-A3B-Q4_K_M.gguf",
+//	    llama.WithNCPUMoE(20),
+//	)
+func WithNCPUMoE(n int) ModelOption {
+	return func(c *modelConfig) {
+		if n > 0 {
+			c.tensorOverrides = append(c.tensorOverrides, tensorOverride{expertLayers: n})
+		}
+	}
+}
+
 // WithSilentLoading disables progress output during model loading.
 //
 // By default, llama.cpp prints dots to stderr to indicate loading progress.

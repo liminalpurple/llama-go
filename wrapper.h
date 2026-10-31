@@ -45,6 +45,11 @@ typedef struct {
     int image_max_tokens;
     const char* main_gpu;   // Main GPU
     const char* tensor_split; // Tensor split
+    // Tensors whose names match a pattern (ECMAScript regex) are stored on the named device
+    // instead; the first matching pattern wins
+    const char* const* tensor_override_patterns;
+    const char* const* tensor_override_devices;
+    int n_tensor_overrides;
     const char* kv_cache_type; // KV cache quantization: "f16", "q8_0", "q4_0"
     const char* flash_attn;    // Flash Attention: "auto", "enabled", "disabled"
     const char* rope_scaling_type; // "none", "linear", "yarn", "longrope"; NULL = from model
@@ -253,6 +258,23 @@ typedef struct {
 
 int llama_wrapper_get_gpu_count();
 bool llama_wrapper_get_gpu_info(int device_id, llama_wrapper_gpu_info* info);
+
+// Backend devices, on any backend; device names are what tensor overrides accept
+typedef struct {
+    char name[128];
+    char description[256];
+    int type;            // enum ggml_backend_dev_type
+    bool has_buffer;     // Whether tensors can be stored on the device
+    unsigned long long free_memory;  // Bytes
+    unsigned long long total_memory; // Bytes
+} llama_wrapper_device_info;
+
+int llama_wrapper_device_count();
+bool llama_wrapper_device_info_get(int index, llama_wrapper_device_info* info);
+
+// The pattern llama.cpp's --cpu-moe uses to match a model's expert tensors;
+// --n-cpu-moe prefixes it with each layer's "blk\.N"
+const char* llama_wrapper_ffn_exps_regex();
 
 // Model runtime information
 typedef struct {

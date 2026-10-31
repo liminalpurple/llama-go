@@ -140,26 +140,64 @@ func LoadModel(path string, opts ...ModelOption) (*Model, error) {
 		defer C.free(unsafe.Pointer(cTensorSplit))
 	}
 
+	// Expand the expert overrides into patterns, keeping the order the options were given
+	var patterns, devices []string
+	for _, o := range config.tensorOverrides {
+		switch {
+		case o.expertLayers < 0:
+			patterns = append(patterns, C.GoString(C.llama_wrapper_ffn_exps_regex()))
+			devices = append(devices, "CPU")
+		case o.expertLayers > 0:
+			for layer := range o.expertLayers {
+				patterns = append(patterns, fmt.Sprintf(`blk\.%d%s`, layer, C.GoString(C.llama_wrapper_ffn_exps_regex())))
+				devices = append(devices, "CPU")
+			}
+		default:
+			patterns = append(patterns, o.pattern)
+			devices = append(devices, o.device)
+		}
+	}
+	var cPatterns, cDevices **C.char
+	if len(patterns) > 0 {
+		cPatternsArray := make([]*C.char, len(patterns))
+		cDevicesArray := make([]*C.char, len(devices))
+		for i := range patterns {
+			cPatternsArray[i] = C.CString(patterns[i])
+			cDevicesArray[i] = C.CString(devices[i])
+		}
+		defer func() {
+			for i := range cPatternsArray {
+				C.free(unsafe.Pointer(cPatternsArray[i]))
+				C.free(unsafe.Pointer(cDevicesArray[i]))
+			}
+		}()
+		cPatterns = (**C.char)(unsafe.Pointer(&cPatternsArray[0]))
+		cDevices = (**C.char)(unsafe.Pointer(&cDevicesArray[0]))
+	}
+
 	params := C.llama_wrapper_model_params{
-		n_ctx:            0, // Not used for model loading
-		n_batch:          0, // Not used for model loading
-		n_ubatch:         0, // Not used for model loading
-		n_gpu_layers:     C.int(config.gpuLayers),
-		n_threads:        0, // Not used for model loading
-		n_threads_batch:  0, // Not used for model loading
-		n_parallel:       0, // Not used for model loading
-		f16_memory:       false,
-		mlock:            C.bool(config.mlock),
-		mmap:             C.bool(config.mmap),
-		load_mtp:         C.bool(config.mtpHead),
-		mmproj:           cMMProj,
-		image_min_tokens: C.int(config.imageMinTokens),
-		image_max_tokens: C.int(config.imageMaxTokens),
-		embeddings:       false,
-		main_gpu:         cMainGPU,
-		tensor_split:     cTensorSplit,
-		kv_cache_type:    nil,
-		flash_attn:       nil,
+		n_ctx:                    0, // Not used for model loading
+		n_batch:                  0, // Not used for model loading
+		n_ubatch:                 0, // Not used for model loading
+		n_gpu_layers:             C.int(config.gpuLayers),
+		n_threads:                0, // Not used for model loading
+		n_threads_batch:          0, // Not used for model loading
+		n_parallel:               0, // Not used for model loading
+		f16_memory:               false,
+		mlock:                    C.bool(config.mlock),
+		mmap:                     C.bool(config.mmap),
+		load_mtp:                 C.bool(config.mtpHead),
+		mmproj:                   cMMProj,
+		image_min_tokens:         C.int(config.imageMinTokens),
+		image_max_tokens:         C.int(config.imageMaxTokens),
+		embeddings:               false,
+		main_gpu:                 cMainGPU,
+		tensor_split:             cTensorSplit,
+		tensor_override_patterns: cPatterns,
+		tensor_override_devices:  cDevices,
+		n_tensor_overrides:       C.int(len(patterns)),
+		kv_cache_type:            nil,
+		flash_attn:               nil,
 	}
 
 	// Configure progress callback if requested

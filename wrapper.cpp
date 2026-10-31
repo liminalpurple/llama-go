@@ -22,6 +22,7 @@
 #include <functional>
 #include <random>
 #include <cstring>
+#include <regex>
 
 // CUDA backend header for GPU info
 #ifdef GGML_USE_CUDA
@@ -445,6 +446,38 @@ void* llama_wrapper_model_load(const char* model_path, llama_wrapper_model_param
                 start = end + 1;
             }
             model_params.tensor_split = tensor_split.data();
+        }
+
+        // Tensor overrides, ending with the empty entry llama.cpp expects. The loader only
+        // reads them while loading, so they need not outlive this call
+        std::vector<llama_model_tensor_buft_override> tensor_overrides;
+        if (params.n_tensor_overrides > 0) {
+            for (int i = 0; i < params.n_tensor_overrides; i++) {
+                const char* pattern = params.tensor_override_patterns[i];
+                const char* name = params.tensor_override_devices[i];
+                try {
+                    std::regex check(pattern);
+                } catch (const std::regex_error& e) {
+                    g_last_error = "Invalid tensor override pattern \"" + std::string(pattern) + "\": " + e.what();
+                    return nullptr;
+                }
+                ggml_backend_dev_t dev = ggml_backend_dev_by_name(name);
+                ggml_backend_buffer_type_t buft = dev ? ggml_backend_dev_buffer_type(dev) : nullptr;
+                if (!buft) {
+                    std::string available;
+                    for (size_t d = 0; d < ggml_backend_dev_count(); d++) {
+                        ggml_backend_dev_t candidate = ggml_backend_dev_get(d);
+                        if (ggml_backend_dev_buffer_type(candidate)) {
+                            available += (available.empty() ? "" : ", ") + std::string(ggml_backend_dev_name(candidate));
+                        }
+                    }
+                    g_last_error = "Unknown tensor override device \"" + std::string(name) + "\" (available: " + available + ")";
+                    return nullptr;
+                }
+                tensor_overrides.push_back({pattern, buft});
+            }
+            tensor_overrides.push_back({nullptr, nullptr});
+            model_params.tensor_buft_overrides = tensor_overrides.data();
         }
 
         llama_model* model = llama_model_load_from_file(model_path, model_params);
@@ -2111,6 +2144,29 @@ bool llama_wrapper_get_gpu_info(int device_id, llama_wrapper_gpu_info* info) {
 #else
     return false;
 #endif
+}
+
+int llama_wrapper_device_count() {
+    return (int)ggml_backend_dev_count();
+}
+
+bool llama_wrapper_device_info_get(int index, llama_wrapper_device_info* info) {
+    if (!info || index < 0 || (size_t)index >= ggml_backend_dev_count()) return false;
+
+    ggml_backend_dev_t dev = ggml_backend_dev_get(index);
+    snprintf(info->name, sizeof(info->name), "%s", ggml_backend_dev_name(dev));
+    snprintf(info->description, sizeof(info->description), "%s", ggml_backend_dev_description(dev));
+    info->type = (int)ggml_backend_dev_type(dev);
+    info->has_buffer = ggml_backend_dev_buffer_type(dev) != nullptr;
+    size_t free_mem = 0, total_mem = 0;
+    ggml_backend_dev_memory(dev, &free_mem, &total_mem);
+    info->free_memory = free_mem;
+    info->total_memory = total_mem;
+    return true;
+}
+
+const char* llama_wrapper_ffn_exps_regex() {
+    return LLM_FFN_EXPS_REGEX;
 }
 
 // Get runtime information about model and context
