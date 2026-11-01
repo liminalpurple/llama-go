@@ -4,9 +4,9 @@ import (
 	"os"
 	"time"
 
+	llama "github.com/liminalpurple/llama-go"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	llama "github.com/tcpipuk/llama-go"
 )
 
 var _ = Describe("GPU Layer Configuration", Label("gpu-layers"), func() {

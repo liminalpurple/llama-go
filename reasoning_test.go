@@ -8,7 +8,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	llama "github.com/tcpipuk/llama-go"
+	llama "github.com/liminalpurple/llama-go"
 )
 
 var _ = Describe("Reasoning", func() {

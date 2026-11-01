@@ -25,7 +25,7 @@ Before updating, ensure a clean build environment:
 ls -la *.a *.so 2>/dev/null
 
 # Clean all build artifacts using Docker for consistent environment
-docker run --rm -v $(pwd):/workspace -w /workspace git.tomfos.tr/tom/llama-go:build-cuda \
+docker run --rm -v $(pwd):/workspace -w /workspace git.cisnt.uk/morgan/llama-go:build-cuda \
   "make clean"
 
 # Verify cleanup - should return no results
@@ -79,7 +79,7 @@ ls -la libbinding.a 2>/dev/null  # Should return nothing
 
 # Build with Docker for consistent environment (expect 20-25 minutes with FA_ALL_QUANTS enabled).
 # Default linkage is static (single-binary friendly); no LD_LIBRARY_PATH gymnastics needed.
-docker run --rm -v $(pwd):/workspace -w /workspace git.tomfos.tr/tom/llama-go:build-cuda \
+docker run --rm -v $(pwd):/workspace -w /workspace git.cisnt.uk/morgan/llama-go:build-cuda \
   "BUILD_TYPE=cublas CUDA_ARCHITECTURES=86 make libbinding.a"
 
 # Verify build created all artifacts (static mode -> .a files in workspace root)
@@ -105,11 +105,11 @@ ls -la Qwen3-Embedding-0.6B-Q8_0.gguf 2>/dev/null || \
   wget -q https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf
 
 # Test inference pipeline. -tags cublas pulls in the CUDA backend's CGO LDFLAGS.
-docker run --rm --gpus all -v $(pwd):/workspace -w /workspace git.tomfos.tr/tom/llama-go:build-cuda \
+docker run --rm --gpus all -v $(pwd):/workspace -w /workspace git.cisnt.uk/morgan/llama-go:build-cuda \
   "go run -tags cublas ./examples/simple -m Qwen3-0.6B-Q8_0.gguf -p 'Hello world' -n 50"
 
 # Test embedding functionality
-docker run --rm --gpus all -v $(pwd):/workspace -w /workspace git.tomfos.tr/tom/llama-go:build-cuda \
+docker run --rm --gpus all -v $(pwd):/workspace -w /workspace git.cisnt.uk/morgan/llama-go:build-cuda \
   "go run -tags cublas ./examples/embedding -m Qwen3-Embedding-0.6B-Q8_0.gguf -t 'Hello world'"
 
 # Run test suite with test models
@@ -122,7 +122,7 @@ docker run --rm --gpus all --cpus=8 -v $(pwd):/workspace -w /workspace \
   -e TEST_CHAT_MODEL=Qwen3-0.6B-Q8_0.gguf \
   -e TEST_EMBEDDING_MODEL=Qwen3-Embedding-0.6B-Q8_0.gguf \
   -e LLAMA_LOG=error \
-  git.tomfos.tr/tom/llama-go:build-cuda \
+  git.cisnt.uk/morgan/llama-go:build-cuda \
   "go run github.com/onsi/ginkgo/v2/ginkgo -tags cublas --flake-attempts 3 -v ./..."
 ```
 
@@ -133,7 +133,7 @@ should be verified before tagging a release, since it isn't on the per-PR loop.
 
 ```bash
 # Clean rebuild in shared mode (full 20-25 min — cmake reconfigure required)
-docker run --rm -v $(pwd):/workspace -w /workspace git.tomfos.tr/tom/llama-go:build-cuda \
+docker run --rm -v $(pwd):/workspace -w /workspace git.cisnt.uk/morgan/llama-go:build-cuda \
   "make clean && BUILD_TYPE=cublas CUDA_ARCHITECTURES=86 BUILD_LINKAGE=shared make libbinding.a"
 
 # Should now have .so files instead of .a files in the workspace
@@ -145,7 +145,7 @@ docker run --rm --gpus all --cpus=8 -v $(pwd):/workspace -w /workspace \
   -e TEST_CHAT_MODEL=Qwen3-0.6B-Q8_0.gguf \
   -e TEST_EMBEDDING_MODEL=Qwen3-Embedding-0.6B-Q8_0.gguf \
   -e LLAMA_LOG=error \
-  git.tomfos.tr/tom/llama-go:build-cuda \
+  git.cisnt.uk/morgan/llama-go:build-cuda \
   "go run github.com/onsi/ginkgo/v2/ginkgo -tags 'cublas shared_lib' --flake-attempts 3 -v ./..."
 ```
 

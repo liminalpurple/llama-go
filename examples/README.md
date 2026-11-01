@@ -24,12 +24,12 @@ appears dimmed for reasoning models.
 ```bash
 # Interactive streaming chat - the full experience
 docker run --rm -it -v $(pwd):/workspace -w /workspace \
-  git.tomfos.tr/tom/llama-go:build-cuda \
+  git.cisnt.uk/morgan/llama-go:build-cuda \
   "go run ./examples/chat-streaming -model Qwen3-0.6B-Q8_0.gguf"
 
 # Or try a single message
 docker run --rm -v $(pwd):/workspace -w /workspace \
-  git.tomfos.tr/tom/llama-go:build-cuda \
+  git.cisnt.uk/morgan/llama-go:build-cuda \
   "go run ./examples/chat-streaming -model Qwen3-0.6B-Q8_0.gguf -message 'Explain quantum computing'"
 ```
 
@@ -51,17 +51,17 @@ structure and conversation management as chat-streaming.
 ```bash
 # Single message mode
 docker run --rm -v $(pwd):/workspace -w /workspace \
-  git.tomfos.tr/tom/llama-go:build-cuda \
+  git.cisnt.uk/morgan/llama-go:build-cuda \
   "go run ./examples/chat -model Qwen3-0.6B-Q8_0.gguf -message 'What is Go?'"
 
 # Interactive chat mode (no -message flag)
 docker run --rm -it -v $(pwd):/workspace -w /workspace \
-  git.tomfos.tr/tom/llama-go:build-cuda \
+  git.cisnt.uk/morgan/llama-go:build-cuda \
   "go run ./examples/chat -model Qwen3-0.6B-Q8_0.gguf"
 
 # With reasoning output (for reasoning models)
 docker run --rm -v $(pwd):/workspace -w /workspace \
-  git.tomfos.tr/tom/llama-go:build-cuda \
+  git.cisnt.uk/morgan/llama-go:build-cuda \
   "go run ./examples/chat -model model.gguf -message 'Think through: 2+2*3' -reasoning"
 ```
 
@@ -92,17 +92,17 @@ example.
 ```bash
 # Single message with streaming
 docker run --rm -v $(pwd):/workspace -w /workspace \
-  git.tomfos.tr/tom/llama-go:build-cuda \
+  git.cisnt.uk/morgan/llama-go:build-cuda \
   "go run ./examples/chat-streaming -model Qwen3-0.6B-Q8_0.gguf -message 'Explain quantum computing'"
 
 # Interactive streaming chat (no -message flag)
 docker run --rm -it -v $(pwd):/workspace -w /workspace \
-  git.tomfos.tr/tom/llama-go:build-cuda \
+  git.cisnt.uk/morgan/llama-go:build-cuda \
   "go run ./examples/chat-streaming -model Qwen3-0.6B-Q8_0.gguf"
 
 # With reasoning visualisation
 docker run --rm -it -v $(pwd):/workspace -w /workspace \
-  git.tomfos.tr/tom/llama-go:build-cuda \
+  git.cisnt.uk/morgan/llama-go:build-cuda \
   "go run ./examples/chat-streaming -model model.gguf -message 'Think step by step: 2+2*3' -reasoning"
 ```
 
@@ -122,12 +122,12 @@ channels with context support for cancellation and timeouts).
 ```bash
 # Callback-based streaming (default)
 echo "Tell me a story about robots" | docker run --rm -i -v $(pwd):/workspace -w /workspace \
-  git.tomfos.tr/tom/llama-go:build-cuda \
+  git.cisnt.uk/morgan/llama-go:build-cuda \
   "go run ./examples/streaming -model Qwen3-0.6B-Q8_0.gguf"
 
 # Channel-based streaming with timeout
 docker run --rm -v $(pwd):/workspace -w /workspace \
-  git.tomfos.tr/tom/llama-go:build-cuda \
+  git.cisnt.uk/morgan/llama-go:build-cuda \
   "go run ./examples/streaming -model Qwen3-0.6B-Q8_0.gguf -prompt 'Hello' -channel -timeout 30"
 ```
 
@@ -148,7 +148,7 @@ generate text. This is the simplest possible integration pattern.
 ```bash
 # Single-shot generation
 docker run --rm -v $(pwd):/workspace -w /workspace \
-  git.tomfos.tr/tom/llama-go:build-cuda \
+  git.cisnt.uk/morgan/llama-go:build-cuda \
   "go run ./examples/simple -m Qwen3-0.6B-Q8_0.gguf -p 'The capital of France is' -n 50"
 ```
 
@@ -182,7 +182,7 @@ range from 1.5× to 3×.
 
 ```bash
 docker run --rm -v $(pwd):/workspace -w /workspace \
-  git.tomfos.tr/tom/llama-go:build-cuda \
+  git.cisnt.uk/morgan/llama-go:build-cuda \
   "go run ./examples/speculative -target large-model.gguf -draft small-model.gguf -p 'Write a story'"
 ```
 
@@ -204,7 +204,7 @@ Loads models in embedding mode and produces vector representations from text.
 
 ```bash
 docker run --rm -v $(pwd):/workspace -w /workspace \
-  git.tomfos.tr/tom/llama-go:build-cuda \
+  git.cisnt.uk/morgan/llama-go:build-cuda \
   "go run ./examples/embedding -m embedding-model.gguf -t 'Hello world'"
 ```
 

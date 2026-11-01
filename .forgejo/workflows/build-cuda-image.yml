@@ -24,7 +24,7 @@ on:
       - 'Dockerfile.cuda'
 
 env:
-  REGISTRY: git.tomfos.tr
+  REGISTRY: git.cisnt.uk
   IMAGE_TAG: build-cuda
 
 jobs:

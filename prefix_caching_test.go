@@ -5,9 +5,9 @@ import (
 	"os"
 	"strings"
 
+	llama "github.com/liminalpurple/llama-go"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	llama "github.com/tcpipuk/llama-go"
 )
 
 var _ = Describe("Prefix Caching", Label("prefix-caching"), func() {

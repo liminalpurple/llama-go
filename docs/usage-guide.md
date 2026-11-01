@@ -1,7 +1,7 @@
 # Usage Guide
 
 > **Looking for API reference?** See the
-> [godoc reference](https://pkg.go.dev/github.com/tcpipuk/llama-go) for complete API documentation
+> [godoc reference](https://pkg.go.dev/github.com/liminalpurple/llama-go) for complete API documentation
 > with examples.
 
 This guide focuses on patterns, best practices, and integration examples for llama-go.
@@ -29,7 +29,7 @@ package main
 
 import (
     "fmt"
-    llama "github.com/tcpipuk/llama-go"
+    llama "github.com/liminalpurple/llama-go"
 )
 
 func main() {
@@ -326,7 +326,7 @@ Options use the functional options pattern, separated into ModelOption and Conte
 The RoPE options validate their values: `NewContext` returns an error for an unknown scaling
 method or an out-of-range number.
 
-See the [option documentation](https://pkg.go.dev/github.com/tcpipuk/llama-go#pkg-functions) for
+See the [option documentation](https://pkg.go.dev/github.com/liminalpurple/llama-go#pkg-functions) for
 complete details, defaults, and usage examples.
 
 ## Thread safety
@@ -836,12 +836,12 @@ Common errors:
 ## API reference
 
 Complete API documentation is available at
-[pkg.go.dev/github.com/tcpipuk/llama-go](https://pkg.go.dev/github.com/tcpipuk/llama-go), including
-detailed method documentation, examples, and type definitions.
+[pkg.go.dev/github.com/liminalpurple/llama-go](https://pkg.go.dev/github.com/liminalpurple/llama-go),
+including detailed method documentation, examples, and type definitions.
 
 ## Next steps
 
 - See [examples/](../examples/) for working code demonstrating all patterns
 - Check [building.md](building.md) for hardware acceleration options (CUDA, Metal, Vulkan, etc.)
 - Read [getting-started.md](getting-started.md) for installation and setup
-- Visit [pkg.go.dev](https://pkg.go.dev/github.com/tcpipuk/llama-go) for complete API reference
+- Visit [pkg.go.dev](https://pkg.go.dev/github.com/liminalpurple/llama-go) for complete API reference

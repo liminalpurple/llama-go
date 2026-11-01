@@ -4,9 +4,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/liminalpurple/llama-go"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/tcpipuk/llama-go"
 )
 
 // Streaming test suite for GenerateStream functionality.

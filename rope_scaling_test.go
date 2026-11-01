@@ -7,7 +7,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/tcpipuk/llama-go"
+	"github.com/liminalpurple/llama-go"
 )
 
 // RoPE scaling test suite

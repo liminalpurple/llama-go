@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"strings"
 
-	llama "github.com/tcpipuk/llama-go"
+	llama "github.com/liminalpurple/llama-go"
 )
 
 // DisplayModelStats renders model statistics with rainbow gradient colours and smart wrapping.

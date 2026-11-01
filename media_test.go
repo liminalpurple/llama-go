@@ -12,9 +12,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/liminalpurple/llama-go"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/tcpipuk/llama-go"
 )
 
 // solidPNG encodes a square image of one colour

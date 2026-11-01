@@ -1,4 +1,4 @@
-module github.com/tcpipuk/llama-go
+module github.com/liminalpurple/llama-go
 
 go 1.27.3
 

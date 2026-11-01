@@ -24,15 +24,15 @@ We recommend using the project's build containers which include:
 - CUDA development tools
 - All required dependencies
 
-The build container includes CUDA support: `git.tomfos.tr/tom/llama-go:build-cuda`
+The build container includes CUDA support: `git.cisnt.uk/morgan/llama-go:build-cuda`
 
 ```bash
 # Standard build (includes CUDA support)
-docker run --rm -v $(pwd):/workspace -w /workspace git.tomfos.tr/tom/llama-go:build-cuda \
+docker run --rm -v $(pwd):/workspace -w /workspace git.cisnt.uk/morgan/llama-go:build-cuda \
   bash -c "LIBRARY_PATH=/workspace C_INCLUDE_PATH=/workspace make libbinding.a"
 
 # CUDA-accelerated build
-docker run --rm -v $(pwd):/workspace -w /workspace git.tomfos.tr/tom/llama-go:build-cuda \
+docker run --rm -v $(pwd):/workspace -w /workspace git.cisnt.uk/morgan/llama-go:build-cuda \
   bash -c "LIBRARY_PATH=/workspace C_INCLUDE_PATH=/workspace make libbinding.a"
 ```
 
@@ -229,14 +229,14 @@ transitively via `libggml-cuda.so`'s NEEDED entries.
 Build with CUDA support (default static linkage):
 
 ```bash
-docker run --rm -v $(pwd):/workspace -w /workspace git.tomfos.tr/tom/llama-go:build-cuda \
+docker run --rm -v $(pwd):/workspace -w /workspace git.cisnt.uk/morgan/llama-go:build-cuda \
   bash -c "LIBRARY_PATH=/workspace C_INCLUDE_PATH=/workspace BUILD_TYPE=cublas CUDA_ARCHITECTURES=86 make libbinding.a"
 ```
 
 Run, passing `-tags cublas` to enable the CUDA build tag:
 
 ```bash
-docker run --rm --gpus all -v $(pwd):/workspace -w /workspace git.tomfos.tr/tom/llama-go:build-cuda \
+docker run --rm --gpus all -v $(pwd):/workspace -w /workspace git.cisnt.uk/morgan/llama-go:build-cuda \
   bash -c "LIBRARY_PATH=/workspace C_INCLUDE_PATH=/workspace \
            go run -tags cublas ./examples -m /path/to/model.gguf -p 'Hello world' -n 50"
 ```
@@ -247,11 +247,11 @@ For CPU acceleration without GPU hardware:
 
 ```bash
 # Build with OpenBLAS
-docker run --rm -v $(pwd):/workspace -w /workspace git.tomfos.tr/tom/llama-go:build-cuda \
+docker run --rm -v $(pwd):/workspace -w /workspace git.cisnt.uk/morgan/llama-go:build-cuda \
   bash -c "BUILD_TYPE=openblas LIBRARY_PATH=/workspace C_INCLUDE_PATH=/workspace make libbinding.a"
 
 # Run with OpenBLAS — the openblas build tag activates `#cgo LDFLAGS: -lopenblas`
-docker run --rm -v $(pwd):/workspace -w /workspace git.tomfos.tr/tom/llama-go:build-cuda \
+docker run --rm -v $(pwd):/workspace -w /workspace git.cisnt.uk/morgan/llama-go:build-cuda \
   bash -c "LIBRARY_PATH=/workspace C_INCLUDE_PATH=/workspace \
            go run -tags openblas ./examples -m /path/to/model.gguf -p 'Hello world' -n 50"
 ```

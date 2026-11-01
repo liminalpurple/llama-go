@@ -29,7 +29,7 @@ import (
 	"runtime"
 	"time"
 
-	llama "github.com/tcpipuk/llama-go"
+	llama "github.com/liminalpurple/llama-go"
 )
 
 func main() {

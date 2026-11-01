@@ -18,7 +18,7 @@ That's it - we'll handle everything else through containers to avoid dependency 
 Clone the repository with its llama.cpp submodule:
 
 ```bash
-git clone --recurse-submodules https://github.com/tcpipuk/llama-go
+git clone --recurse-submodules https://github.com/liminalpurple/llama-go
 cd llama-go
 ```
 
@@ -33,7 +33,7 @@ git submodule update --init --recursive
 We'll use the project's build containers which include all necessary build tools, including CMake:
 
 ```bash
-docker run --rm -v $(pwd):/workspace -w /workspace git.tomfos.tr/tom/llama-go:build-cuda \
+docker run --rm -v $(pwd):/workspace -w /workspace git.cisnt.uk/morgan/llama-go:build-cuda \
   bash -c "LIBRARY_PATH=/workspace C_INCLUDE_PATH=/workspace make libbinding.a"
 ```
 
@@ -177,7 +177,7 @@ Now that the library works, here's how to integrate it into your Go application:
 1. **Import the package** in your Go code:
 
    ```go
-   import llama "github.com/tcpipuk/llama-go"
+   import llama "github.com/liminalpurple/llama-go"
    ```
 
 2. **Use the Model/Context API pattern**:

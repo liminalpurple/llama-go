@@ -2,7 +2,7 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [main, "tom/*"]
+    branches: [main, "morgan/*"]
   pull_request:
 
 concurrency:
@@ -10,13 +10,13 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  REGISTRY: git.tomfos.tr
+  REGISTRY: git.cisnt.uk
 
 jobs:
   test:
     runs-on: ubuntu-latest
     container:
-      image: git.tomfos.tr/tom/llama-go:build-cuda
+      image: git.cisnt.uk/morgan/llama-go:build-cuda
     env:
       LIBRARY_PATH: ${{ github.workspace }}
       C_INCLUDE_PATH: ${{ github.workspace }}
@@ -58,7 +58,7 @@ jobs:
 
       - name: Detect versions
         id: versions
-        uses: https://git.tomfos.tr/actions/detect-versions@v1
+        uses: https://git.cisnt.uk/actions/detect-versions@v1
 
       - name: Cache test models
         uses: https://github.com/actions/cache@v4
@@ -88,7 +88,7 @@ jobs:
             ${{ steps.versions.outputs.slug }}-${{ steps.versions.outputs.arch }}-go-
 
       - name: Setup sccache
-        uses: https://git.tomfos.tr/tom/sccache-action@v1
+        uses: https://git.cisnt.uk/actions/sccache-action@v1
 
       - name: Verify vendored llama.cpp headers are up to date
         run: |

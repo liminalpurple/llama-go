@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/liminalpurple/llama-go"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/tcpipuk/llama-go"
 )
 
 // speculationPrompt continues the same way however it's computed. Speculation
