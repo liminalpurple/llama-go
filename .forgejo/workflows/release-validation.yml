@@ -62,19 +62,8 @@ jobs:
         id: versions
         uses: https://git.cisnt.uk/actions/detect-versions@v1
 
-      - name: Cache test models
-        uses: https://github.com/actions/cache@v4
-        with:
-          path: |
-            Qwen3-0.6B-Q8_0.gguf
-            Qwen3-Embedding-0.6B-Q8_0.gguf
-            Qwen3.5-0.8B
-            gemma-4-E2B-it
-            decision-tinyopenjev
-            decision-tinylaya
-            Kev-0.8B
-            vllm-d3-edge
-          key: test-models-v4
+      - name: Test models
+        uses: ./.forgejo/actions/test-models
 
       - name: Cache dependencies
         uses: https://github.com/actions/cache@v4
@@ -97,35 +86,6 @@ jobs:
         run: |
           echo "=== Workspace root ==="
           ls -la *.a *.so 2>/dev/null || echo "no artefacts"
-
-      - name: Download test models
-        run: |
-          if [ ! -f Qwen3-0.6B-Q8_0.gguf ]; then
-            wget -q https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf
-          fi
-          if [ ! -f Qwen3-Embedding-0.6B-Q8_0.gguf ]; then
-            wget -q https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf
-          fi
-          # fetch <folder> <repo> <file in repo>
-          fetch() {
-            mkdir -p "$1"
-            if [ ! -f "$1/$(basename "$3")" ]; then
-              wget -q -O "$1/$(basename "$3")" "https://huggingface.co/$2/resolve/main/$3"
-            fi
-          }
-          # The MTP build keeps the head that unsloth/Qwen3.5-0.8B-GGUF strips
-          fetch Qwen3.5-0.8B unsloth/Qwen3.5-0.8B-MTP-GGUF Qwen3.5-0.8B-Q8_0.gguf
-          fetch Qwen3.5-0.8B unsloth/Qwen3.5-0.8B-MTP-GGUF mmproj-F16.gguf
-          fetch gemma-4-E2B-it unsloth/gemma-4-E2B-it-GGUF gemma-4-E2B-it-Q4_K_M.gguf
-          fetch gemma-4-E2B-it unsloth/gemma-4-E2B-it-GGUF MTP/mtp-gemma-4-E2B-it-Q8_0.gguf
-          fetch gemma-4-E2B-it unsloth/gemma-4-E2B-it-GGUF mmproj-F16.gguf
-          fetch decision-tinyopenjev ggml-org/tinyopenjev-for-testing-gguf tinyopenjev-for-testing-Q8_0.gguf
-          fetch decision-tinyopenjev ggml-org/tinyopenjev-for-testing-gguf mmproj-tinyopenjev-for-testing-Q8_0.gguf
-          fetch decision-tinylaya ggml-org/tinylaya-for-testing-gguf tinylaya-for-testing-Q8_0.gguf
-          fetch Kev-0.8B ggml-org/Kev-0.8B-GGUF Kev-0.8B-Q8_0.gguf
-          fetch vllm-d3-edge ggml-org/vllm-d3-edge-GGUF vllm-d3-edge-Q8_0.gguf
-          fetch vllm-d3-edge ggml-org/vllm-d3-edge-GGUF mmproj-vllm-d3-edge-Q8_0.gguf
-          fetch stories15M_MOE ggml-org/stories15M_MOE stories15M_MOE-F16.gguf
 
       - name: Compute Go build tags
         id: tags
