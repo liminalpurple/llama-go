@@ -57,7 +57,7 @@ jobs:
       LLAMA_LOG: error
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -69,7 +69,7 @@ jobs:
         uses: ./.forgejo/actions/test-models
 
       - name: Cache dependencies
-        uses: https://github.com/actions/cache@v4
+        uses: https://github.com/actions/cache@v6
         with:
           path: |
             ~/go/pkg/mod

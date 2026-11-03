@@ -7,7 +7,7 @@ runs:
     # One list of models for ci.yml and release-validation.yml. Bump the key when the list
     # changes, so the cache is rebuilt with the new set.
     - name: Restore cached test models
-      uses: https://github.com/actions/cache@v4
+      uses: https://github.com/actions/cache@v6
       with:
         path: |
           Qwen3-0.6B-Q8_0.gguf
