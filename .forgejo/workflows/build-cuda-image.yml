@@ -27,6 +27,13 @@ env:
   REGISTRY: git.cisnt.uk
   IMAGE_TAG: build-cuda
 
+concurrency:
+  # One llama.cpp build at a time across the repository: CI, release
+  # validation and the CUDA image share this group, and a run that arrives
+  # while another is going waits for it rather than cancelling it.
+  group: llama-go-build
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest

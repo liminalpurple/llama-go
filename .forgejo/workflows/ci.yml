@@ -6,8 +6,11 @@ on:
   pull_request:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # One llama.cpp build at a time across the repository: CI, release
+  # validation and the CUDA image share this group, and a run that arrives
+  # while another is going waits for it rather than cancelling it.
+  group: llama-go-build
+  cancel-in-progress: false
 
 env:
   REGISTRY: git.cisnt.uk
