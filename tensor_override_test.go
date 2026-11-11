@@ -37,7 +37,12 @@ var _ = Describe("Devices", Label("devices"), func() {
 		Expect(gpu.Description).NotTo(BeEmpty())
 		Expect(gpu.StoresTensors).To(BeTrue())
 		Expect(gpu.TotalMemory).To(BeNumerically(">", 0))
-		Expect(gpu.FreeMemory).To(BeNumerically("<=", gpu.TotalMemory))
+		Expect(gpu.FreeMemory).To(BeNumerically(">", 0))
+		// With unified memory, CUDA reports the host's available memory as
+		// free, which can exceed the device's own total
+		if os.Getenv("GGML_CUDA_ENABLE_UNIFIED_MEMORY") == "" {
+			Expect(gpu.FreeMemory).To(BeNumerically("<=", gpu.TotalMemory))
+		}
 	})
 })
 

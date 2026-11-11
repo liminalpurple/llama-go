@@ -42,8 +42,11 @@ type Device struct {
 	// Whether tensors can be stored on the device; an accelerator may only compute
 	// on tensors held by the CPU
 	StoresTensors bool
-	FreeMemory    uint64 // Free memory in bytes, as the backend reports it
-	TotalMemory   uint64 // Total memory in bytes
+	// Free memory in bytes, as the backend reports it. With
+	// GGML_CUDA_ENABLE_UNIFIED_MEMORY set, CUDA reports the host's available
+	// memory, which can exceed TotalMemory.
+	FreeMemory  uint64
+	TotalMemory uint64 // Total memory in bytes
 }
 
 // Devices lists the compute devices this build of llama.cpp can use, on any
