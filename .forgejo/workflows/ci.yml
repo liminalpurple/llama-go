@@ -1,9 +1,19 @@
 name: CI/CD Pipeline
 
 on:
+  # Documentation alone doesn't need a llama.cpp build. A push that also
+  # touches anything else still runs.
   push:
     branches: [main, "morgan/*"]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - LICENSE
   pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - LICENSE
 
 concurrency:
   # One llama.cpp build at a time across the repository: CI, release
