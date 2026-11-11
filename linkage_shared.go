@@ -9,13 +9,14 @@
 // In this mode the Makefile copies .so files into the workspace root and the
 // resulting binary depends on them at runtime. The -Wl,-rpath,$ORIGIN flag
 // bakes a relative-to-binary search path into the binary so the .so files only
-// need to sit alongside it (no LD_LIBRARY_PATH required).
+// need to sit alongside it (no LD_LIBRARY_PATH required). At link time they're
+// found through LIBRARY_PATH; linkage_static.go explains why there's no -L./.
 
 package llama
 
 /*
 #cgo CFLAGS: -I./ -I./llama.cpp -I./llama.cpp/include -I./llama.cpp/ggml/include -I./llama.cpp/common -I./llama.cpp/tools/mtmd -I./llama.cpp/vendor -I./cgo_headers -I./cgo_headers/llama.cpp -I./cgo_headers/llama.cpp/include -I./cgo_headers/llama.cpp/ggml/include -I./cgo_headers/llama.cpp/common -I./cgo_headers/llama.cpp/tools/mtmd -I./cgo_headers/llama.cpp/thirdparty
 #cgo CXXFLAGS: -I./ -I./llama.cpp -I./llama.cpp/include -I./llama.cpp/ggml/include -I./llama.cpp/common -I./llama.cpp/tools/mtmd -I./llama.cpp/vendor -I./cgo_headers -I./cgo_headers/llama.cpp -I./cgo_headers/llama.cpp/include -I./cgo_headers/llama.cpp/ggml/include -I./cgo_headers/llama.cpp/common -I./cgo_headers/llama.cpp/tools/mtmd -I./cgo_headers/llama.cpp/thirdparty
-#cgo LDFLAGS: -L./ -Wl,-rpath,$ORIGIN -lbinding -lserver-context -lmtmd -lllama-common -lllama -lggml -lggml-cpu -lggml-base -lstdc++ -lm -lgomp
+#cgo LDFLAGS: -Wl,-rpath,$ORIGIN -lbinding -lserver-context -lmtmd -lllama-common -lllama -lggml -lggml-cpu -lggml-base -lstdc++ -lm -lgomp
 */
 import "C"

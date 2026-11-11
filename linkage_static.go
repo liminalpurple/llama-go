@@ -17,13 +17,17 @@
 // resolve in a single pass. Apple's ld64 has no group flags (it re-searches
 // archives automatically), no libgomp, and builds the Metal + Accelerate/BLAS
 // backends by default, so darwin gets its own LDFLAGS line.
+//
+// The archives are found through LIBRARY_PATH, not -L./: since Go 1.27.4 the
+// go command walks every local -L directory for GCC spec files, and the
+// repository root holds llama.cpp's RPM .spec files.
 
 package llama
 
 /*
 #cgo CFLAGS: -I./ -I./llama.cpp -I./llama.cpp/include -I./llama.cpp/ggml/include -I./llama.cpp/common -I./llama.cpp/tools/mtmd -I./llama.cpp/vendor -I./cgo_headers -I./cgo_headers/llama.cpp -I./cgo_headers/llama.cpp/include -I./cgo_headers/llama.cpp/ggml/include -I./cgo_headers/llama.cpp/common -I./cgo_headers/llama.cpp/tools/mtmd -I./cgo_headers/llama.cpp/thirdparty
 #cgo CXXFLAGS: -std=c++17 -I./ -I./llama.cpp -I./llama.cpp/include -I./llama.cpp/ggml/include -I./llama.cpp/common -I./llama.cpp/tools/mtmd -I./llama.cpp/vendor -I./cgo_headers -I./cgo_headers/llama.cpp -I./cgo_headers/llama.cpp/include -I./cgo_headers/llama.cpp/ggml/include -I./cgo_headers/llama.cpp/common -I./cgo_headers/llama.cpp/tools/mtmd -I./cgo_headers/llama.cpp/thirdparty
-#cgo !darwin LDFLAGS: -L./ -Wl,--start-group -lbinding -lserver-context -lmtmd -lvendor-hash -lllama-common -lllama-common-base -lcpp-httplib -lllama -lggml-cpu -lggml -lggml-base -Wl,--end-group -lstdc++ -lm -lgomp
-#cgo darwin LDFLAGS: -L./ -lbinding -lserver-context -lmtmd -lvendor-hash -lllama-common -lllama-common-base -lcpp-httplib -lllama -lggml-cpu -lggml -lggml-base -lggml-metal -lggml-blas -lstdc++ -lm -framework Accelerate -framework Foundation -framework Metal -framework MetalKit -framework MetalPerformanceShaders
+#cgo !darwin LDFLAGS: -Wl,--start-group -lbinding -lserver-context -lmtmd -lvendor-hash -lllama-common -lllama-common-base -lcpp-httplib -lllama -lggml-cpu -lggml -lggml-base -Wl,--end-group -lstdc++ -lm -lgomp
+#cgo darwin LDFLAGS: -lbinding -lserver-context -lmtmd -lvendor-hash -lllama-common -lllama-common-base -lcpp-httplib -lllama -lggml-cpu -lggml -lggml-base -lggml-metal -lggml-blas -lstdc++ -lm -framework Accelerate -framework Foundation -framework Metal -framework MetalKit -framework MetalPerformanceShaders
 */
 import "C"
