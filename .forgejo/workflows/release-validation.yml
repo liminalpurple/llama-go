@@ -118,6 +118,10 @@ jobs:
         run: |
           TEST_CHAT_MODEL=$TEST_GEMMA_MODEL go run github.com/onsi/ginkgo/v2/ginkgo -tags '${{ steps.tags.outputs.tags }}' --flake-attempts 3 -v ./...
 
+      # Built into the workspace rather than run with go run, whose binary sits
+      # in a temporary directory: in shared mode it finds the .so files beside
+      # itself through -rpath $ORIGIN, as a real application would
       - name: Run example
         run: |
-          go run -tags '${{ steps.tags.outputs.tags }}' ./examples/simple -m Qwen3-0.6B-Q8_0.gguf -p 'Hello world' -n 50
+          go build -tags '${{ steps.tags.outputs.tags }}' -o ./simple-example ./examples/simple
+          ./simple-example -m Qwen3-0.6B-Q8_0.gguf -p 'Hello world' -n 50
