@@ -966,6 +966,9 @@ static int restore_prompt(llama_wrapper_context_t * w, const prompt_input & prom
             ckpt.load_tgt(w->ctx, 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY) &&
             llama_memory_seq_rm(mem, 0, ckpt.pos_max + 1, -1)) {
             resume_from = (int)ckpt.n_tokens;
+            if (w->spec) {
+                common_speculative_set_state(w->spec, 0, ckpt.data_spec);
+            }
         } else {
             resume_from = 0;
         }
@@ -994,6 +997,11 @@ static void save_prompt_checkpoint(llama_wrapper_context_t * w, const prompt_inp
     llama_memory_t mem = llama_get_memory(w->ctx);
     w->checkpoint.update_pos(n_tokens - 1, llama_memory_seq_pos_min(mem, 0), llama_memory_seq_pos_max(mem, 0));
     w->checkpoint.update_tgt(w->ctx, 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
+    // The drafter's own state (e.g. an MTP head's boundary hidden row) goes
+    // with the checkpoint, as in the server
+    if (w->spec) {
+        common_speculative_get_state(w->spec, 0, w->checkpoint.data_spec);
+    }
 }
 
 // Whether rolling back n tokens after a speculative step needs the state
