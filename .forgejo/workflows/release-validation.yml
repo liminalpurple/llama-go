@@ -26,6 +26,9 @@ jobs:
       image: git.cisnt.uk/morgan/llama-go:build-cuda
     strategy:
       fail-fast: false
+      # One linkage at a time: both builds and every model test share one GPU,
+      # and running them side by side makes each slower without finishing sooner
+      max-parallel: 1
       matrix:
         linkage: [static, shared]
     env:
