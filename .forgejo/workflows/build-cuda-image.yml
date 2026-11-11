@@ -16,7 +16,7 @@ on:
       go_version:
         description: 'Go version'
         required: false
-        default: '1.27.3'
+        default: '1.27.4'
         type: string
   push:
     branches: [main]
@@ -51,4 +51,4 @@ jobs:
           build-args: |
             CUDA_VERSION=${{ github.event.inputs.cuda_version || '13.0.3' }}
             CUDA_ARCHITECTURES=${{ github.event.inputs.cuda_architectures || '86' }}
-            GO_VERSION=${{ github.event.inputs.go_version || '1.27.3' }}
+            GO_VERSION=${{ github.event.inputs.go_version || '1.27.4' }}
