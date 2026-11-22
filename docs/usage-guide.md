@@ -672,7 +672,7 @@ response, _ := ctx.Generate(
     llama.WithTemperature(0.8),      // Randomness (0.0 = deterministic, 1.0+ = creative)
     llama.WithTopP(0.95),            // Nucleus sampling threshold
     llama.WithTopK(40),              // Consider top K tokens
-    llama.WithRepetitionPenalty(1.1), // Penalize repetition
+    llama.WithRepeatPenalty(1.1),    // Penalise recently used tokens
     llama.WithSeed(42),              // Reproducible generation
 )
 ```
