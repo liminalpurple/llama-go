@@ -21,6 +21,19 @@ type ChatOptions struct {
 	TopK        *int     // Top-K sampling (nil = model default, typically 40)
 	Seed        *int     // Random seed for reproducible generation (nil = random)
 	StopWords   []string // Additional stop sequences beyond model defaults
+	MinP        *float32 // Minimum probability relative to the top token (nil = model default, typically 0.05)
+
+	// Repetition penalties
+	RepeatPenalty    *float32 // Penalty multiplier for recently used tokens (nil = 1.0, disabled)
+	FrequencyPenalty *float32 // Penalty scaled by how often a token has appeared (nil = 0.0, disabled)
+	PresencePenalty  *float32 // Flat penalty for any token that has appeared (nil = 0.0, disabled)
+	PenaltyLastN     *int     // Recent tokens the penalties consider (nil = 64, 0 = disabled, -1 = context size)
+
+	// DRY (Don't Repeat Yourself) sampling, which penalises repeated sequences
+	DRYMultiplier    *float32 // Penalty strength (nil = 0.0, disabled; 0.8 is a typical value)
+	DRYBase          *float32 // Growth of the penalty with sequence length (nil = 1.75)
+	DRYAllowedLength *int     // Longest sequence repeated without penalty (nil = 2)
+	DRYPenaltyLastN  *int     // Recent tokens DRY scans (nil = -1, the context size)
 
 	// Chat template (Jinja2 template string)
 	// If empty, uses model's GGUF template. If model has no template, returns error.

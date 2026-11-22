@@ -198,6 +198,33 @@ func chatGenerateOptions(session *chatSession, opts ChatOptions) []GenerateOptio
 	if opts.Seed != nil {
 		genOpts = append(genOpts, WithSeed(*opts.Seed))
 	}
+	if opts.MinP != nil {
+		genOpts = append(genOpts, WithMinP(*opts.MinP))
+	}
+	if opts.RepeatPenalty != nil {
+		genOpts = append(genOpts, WithRepeatPenalty(*opts.RepeatPenalty))
+	}
+	if opts.FrequencyPenalty != nil {
+		genOpts = append(genOpts, WithFrequencyPenalty(*opts.FrequencyPenalty))
+	}
+	if opts.PresencePenalty != nil {
+		genOpts = append(genOpts, WithPresencePenalty(*opts.PresencePenalty))
+	}
+	if opts.PenaltyLastN != nil {
+		genOpts = append(genOpts, WithPenaltyLastN(*opts.PenaltyLastN))
+	}
+	if opts.DRYMultiplier != nil {
+		genOpts = append(genOpts, WithDRYMultiplier(*opts.DRYMultiplier))
+	}
+	if opts.DRYBase != nil {
+		genOpts = append(genOpts, WithDRYBase(*opts.DRYBase))
+	}
+	if opts.DRYAllowedLength != nil {
+		genOpts = append(genOpts, WithDRYAllowedLength(*opts.DRYAllowedLength))
+	}
+	if opts.DRYPenaltyLastN != nil {
+		genOpts = append(genOpts, WithDRYPenaltyLastN(*opts.DRYPenaltyLastN))
+	}
 	return genOpts
 }
 

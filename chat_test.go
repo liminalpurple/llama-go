@@ -106,6 +106,31 @@ var _ = Describe("Chat API", func() {
 				Expect(response.Content).NotTo(ContainSubstring("100"))
 			})
 
+			It("should generate with min-p, repetition and DRY penalties", func() {
+				messages := []llama.ChatMessage{
+					{Role: "user", Content: "Say hello in one sentence."},
+				}
+
+				bgCtx := context.Background()
+				response, err := ctx.Chat(bgCtx, messages, llama.ChatOptions{
+					MaxTokens:        llama.Int(30),
+					EnableThinking:   llama.Bool(false),
+					Temperature:      llama.Float32(0.0),
+					MinP:             llama.Float32(0.1),
+					RepeatPenalty:    llama.Float32(1.1),
+					FrequencyPenalty: llama.Float32(0.2),
+					PresencePenalty:  llama.Float32(0.2),
+					PenaltyLastN:     llama.Int(64),
+					DRYMultiplier:    llama.Float32(0.8),
+					DRYBase:          llama.Float32(1.75),
+					DRYAllowedLength: llama.Int(2),
+					DRYPenaltyLastN:  llama.Int(-1),
+				})
+
+				Expect(err).NotTo(HaveOccurred())
+				Expect(response.Content).NotTo(BeEmpty())
+			})
+
 			It("should handle empty response gracefully", func() {
 				messages := []llama.ChatMessage{
 					{Role: "system", Content: "You are a helpful assistant."},

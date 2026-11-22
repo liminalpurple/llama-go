@@ -677,6 +677,17 @@ response, _ := ctx.Generate(
 )
 ```
 
+Chat takes the same settings as `ChatOptions` fields, left nil for the defaults:
+
+```go
+response, _ := ctx.Chat(context.Background(), messages, llama.ChatOptions{
+    Temperature:   llama.Float32(0.7),
+    MinP:          llama.Float32(0.05), // Drop tokens far less likely than the top one
+    RepeatPenalty: llama.Float32(1.1),  // Penalise recently used tokens
+    DRYMultiplier: llama.Float32(0.8),  // Penalise repeated sequences
+})
+```
+
 ### Tokenization utilities
 
 Access low-level tokenization for analysis or custom workflows:
