@@ -137,7 +137,7 @@ var defaultGenerateConfig = generateConfig{
 	dryMultiplier:       0.0, // 0.0 = disabled
 	dryBase:             1.75,
 	dryAllowedLength:    2,
-	dryPenaltyLastN:     -1, // -1 = context size
+	dryPenaltyLastN:     64, // 0 = disabled
 	drySequenceBreakers: []string{"\n", ":", "\"", "*"},
 
 	// Dynamic temperature

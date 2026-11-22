@@ -483,6 +483,13 @@ func findCommonPrefix(a, b []int32) int {
 
 // validate returns an error for generation options llama.cpp would ignore
 func (g generateConfig) validate() error {
+	// llama.cpp clamps a negative look-back to 0, which disables the penalty
+	if g.penaltyLastN < 0 {
+		return fmt.Errorf("penalty last n must be 0 or more, got %d", g.penaltyLastN)
+	}
+	if g.dryPenaltyLastN < 0 {
+		return fmt.Errorf("DRY penalty last n must be 0 or more, got %d", g.dryPenaltyLastN)
+	}
 	// llama.cpp ignores breakers after the first LLAMA_DRY_MAX_SEQ_BREAKERS
 	// distinct ones, with only a log warning
 	distinct := make(map[string]struct{}, len(g.drySequenceBreakers))

@@ -323,8 +323,8 @@ func WithPresencePenalty(penalty float32) GenerateOption {
 // WithPenaltyLastN sets how many recent tokens to consider for penalties.
 //
 // Repetition penalties (repeat, frequency, presence) only apply to the last
-// n tokens. Use 0 to disable all repetition penalties, -1 to use full context
-// size. Larger values catch longer-range repetition but may over-penalise.
+// n tokens. Use 0 to disable all repetition penalties; a negative value is an
+// error. Larger values catch longer-range repetition but may over-penalise.
 //
 // Default: 64
 //
@@ -409,11 +409,11 @@ func WithDRYAllowedLength(length int) GenerateOption {
 
 // WithDRYPenaltyLastN sets how many recent tokens DRY sampling considers.
 //
-// DRY looks back this many tokens when detecting repetitive patterns.
-// Use -1 for full context size, or specify a smaller window for efficiency.
-// Only affects behaviour when DRY multiplier is enabled.
+// DRY looks back this many tokens when detecting repetitive patterns. Use 0
+// to disable DRY; a negative value is an error. Only affects behaviour when
+// DRY multiplier is enabled.
 //
-// Default: -1 (context size)
+// Default: 64
 //
 // Example:
 //

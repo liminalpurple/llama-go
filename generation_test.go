@@ -247,7 +247,25 @@ var _ = Describe("Model.Generate", func() {
 			Expect(generate(3.0)).NotTo(Equal(generate(1.0)))
 		})
 
-		It("should generate with DRY sampling", Label("integration"), func() {
+		It("should apply WithDRYMultiplier to generated tokens", Label("integration"), func() {
+			// Greedy decoding continues this repeated sentence word for word, so
+			// DRY only changes the output if it penalises extending the repeat
+			prompt := "The tool found the mood. The tool found the mood. The tool found the mood. The tool"
+			generate := func(multiplier float32) string {
+				response, err := ctx.Generate(prompt,
+					llama.WithMaxTokens(30),
+					llama.WithTemperature(0),
+					llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
+					llama.WithDRYMultiplier(multiplier),
+				)
+				Expect(err).NotTo(HaveOccurred())
+				return response
+			}
+
+			Expect(generate(2.0)).NotTo(Equal(generate(0)))
+		})
+
+		It("should generate with DRY sequence breakers", Label("integration"), func() {
 			response, err := ctx.Generate("Hello world",
 				llama.WithMaxTokens(20),
 				llama.WithIgnoreEOS(true), // Instruct models may end a raw prompt early
@@ -256,6 +274,14 @@ var _ = Describe("Model.Generate", func() {
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(response).NotTo(BeEmpty())
+		})
+
+		It("should reject a negative penalty look-back", Label("integration"), func() {
+			_, err := ctx.Generate("Hello world", llama.WithMaxTokens(5), llama.WithPenaltyLastN(-1))
+			Expect(err).To(MatchError("penalty last n must be 0 or more, got -1"))
+
+			_, err = ctx.Generate("Hello world", llama.WithMaxTokens(5), llama.WithDRYPenaltyLastN(-1))
+			Expect(err).To(MatchError("DRY penalty last n must be 0 or more, got -1"))
 		})
 
 		It("should reject more DRY sequence breakers than llama.cpp supports", Label("integration"), func() {

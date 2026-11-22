@@ -124,7 +124,7 @@ var _ = Describe("Chat API", func() {
 					DRYMultiplier:    llama.Float32(0.8),
 					DRYBase:          llama.Float32(1.75),
 					DRYAllowedLength: llama.Int(2),
-					DRYPenaltyLastN:  llama.Int(-1),
+					DRYPenaltyLastN:  llama.Int(64),
 				})
 
 				Expect(err).NotTo(HaveOccurred())
