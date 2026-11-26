@@ -1464,14 +1464,19 @@ static prompt_input decision_prompt(const server_tokens & tokens) {
 }
 
 // Add a media chunk's encoder output to a batch as embeddings, at the
-// positions mtmd decodes it at, as the server's add_mtmd_chunk does
+// positions mtmd decodes it at, as the server's add_mtmd_chunk does. The
+// batch only points at its embeddings and mtmd reuses its output buffer for
+// the next chunk, so the output is copied into store, which must outlive the
+// decode, as the server copies it into its batch.
 static bool add_media_embd(llama_wrapper_context_t * w, const mtmd_input_chunk * chunk, llama_pos pos0, bool output,
-                           common_batch & batch) {
+                           common_batch & batch, std::vector<std::vector<float>> & store) {
     if (mtmd_encode_chunk(w->mtmd, chunk) != 0) {
         return false;
     }
-    const float * embd = mtmd_get_output_embd(w->mtmd);
     const size_t n_embd = llama_model_n_embd_inp(w->model);
+    const float * out = mtmd_get_output_embd(w->mtmd);
+    store.emplace_back(out, out + mtmd_input_chunk_get_n_tokens(chunk) * n_embd);
+    const float * embd = store.back().data();
     const auto * image = mtmd_input_chunk_get_tokens_image(chunk);
     const bool is_mrope = mtmd_decode_use_mrope(w->mtmd);
     for (size_t i = 0; i < mtmd_input_chunk_get_n_tokens(chunk); i++) {
@@ -1538,6 +1543,7 @@ static bool run_decision_task(llama_wrapper_context_t * w, const server_task & t
     }
 
     common_batch batch(w->ctx);
+    std::vector<std::vector<float>> media_embd;  // the media embeddings the batch points at
     for (int i = read_from; i < n_tokens;) {
         size_t start = 0;
         if (const mtmd_input_chunk * chunk = prompt.chunk_at(i, start)) {
@@ -1545,7 +1551,7 @@ static bool run_decision_task(llama_wrapper_context_t * w, const server_task & t
                 g_last_error = "Decision outputs must follow any media in the prompt";
                 return false;
             }
-            if (!add_media_embd(w, chunk, prompt.pos_at(i), need_embd, batch)) {
+            if (!add_media_embd(w, chunk, prompt.pos_at(i), need_embd, batch, media_embd)) {
                 g_last_error = "Failed to encode media";
                 return false;
             }
