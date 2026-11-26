@@ -1160,6 +1160,14 @@ static char* generate_prompt(llama_wrapper_context_t* wrapper, const prompt_inpu
             g_last_error = "Failed to initialise sampler";
             return nullptr;
         }
+        // The penalties count the prompt as well as what's generated, as in
+        // the server's init_sampler. Not generated, so the grammar and the
+        // reasoning budget don't see it.
+        for (const llama_token id : prompt.tokens) {
+            if (id != LLAMA_TOKEN_NULL) {
+                common_sampler_accept(sampler.get(), id, false);
+            }
+        }
 
         // Emit a sampled token, returning false once generation should stop
         const llama_vocab * vocab = llama_model_get_vocab(wrapper->model);
