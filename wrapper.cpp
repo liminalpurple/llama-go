@@ -1486,10 +1486,12 @@ static bool run_decision_task(llama_wrapper_context_t * w, const server_task & t
     const bool mixed = !llama_get_memory(w->ctx) || !llama_get_causal_attn(w->ctx);
     const bool need_embd = task.need_embd();
     const int read_from = mixed ? 0 : (decision.pos_first() >= 0 ? decision.pos_first() : n_tokens - 1);
-    const int n_batch = (int)llama_n_batch(w->ctx);
+    // with non-causal attention the whole batch must fit in one ubatch, as in the server
+    const bool causal = llama_get_causal_attn(w->ctx);
+    const int n_batch = causal ? (int)llama_n_batch(w->ctx) : (int)std::min(llama_n_batch(w->ctx), llama_n_ubatch(w->ctx));
     if (n_tokens - read_from > n_batch) {
         g_last_error = "Decision needs " + std::to_string(n_tokens - read_from) + " tokens in one batch, more than the context's " +
-                       std::to_string(n_batch) + "; increase WithBatch";
+                       std::to_string(n_batch) + (causal ? "; increase WithBatch" : "; increase WithBatch and WithUBatch");
         return false;
     }
 
