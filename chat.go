@@ -155,6 +155,16 @@ func (s *chatSession) feed(text string, final bool) (content, reasoningContent s
 	return content, reasoningContent, nil
 }
 
+// drainUntilStopped waits for a generation to stop. The generation records
+// each token on the chat session, so it must stop before the session is
+// freed. Deferred after session.close, it runs first; an early return has
+// either seen generation finish or had its context cancelled, which stops
+// generation at the next token.
+func drainUntilStopped(tokenCh <-chan string) {
+	for range tokenCh {
+	}
+}
+
 // cPtr returns the session for the C generate params, or nil without one.
 func (s *chatSession) cPtr() unsafe.Pointer {
 	if s == nil {
@@ -239,6 +249,7 @@ func (m *Model) chatWithContext(ctx gocontext.Context, c *Context, messages []Ch
 	defer session.close()
 
 	tokenCh, errCh := c.GenerateChannel(ctx, session.prompt(), chatGenerateOptions(session, opts)...)
+	defer drainUntilStopped(tokenCh)
 
 	var output strings.Builder
 
@@ -306,6 +317,7 @@ func (m *Model) chatStreamWithContext(ctx gocontext.Context, c *Context, message
 		defer session.close()
 
 		tokenCh, genErrCh := c.GenerateChannel(ctx, session.prompt(), chatGenerateOptions(session, opts)...)
+		defer drainUntilStopped(tokenCh)
 
 		// Previous parsed state for delta computation
 		var prevContent, prevReasoning string
