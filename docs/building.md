@@ -220,7 +220,7 @@ per-backend Go files (`llama_<backend>.go` and, for CUDA, `llama_cublas_static.g
 | Vulkan | `BUILD_TYPE=vulkan make libbinding.a` | `-tags vulkan` | Cross-platform GPU (NVIDIA, AMD, Intel, ARM). |
 
 For shared linkage, append `shared_lib` to the build tag list (e.g. `-tags 'cublas shared_lib'`).
-The CUDA backend's static-mode CGO LDFLAGS are explicit (`-lcudart -lcublas -lcuda -lnccl`)
+The CUDA backend's static-mode CGO LDFLAGS are explicit (`-lcudart -lcublas -lcublasLt -lcuda -lnccl`)
 because static archives don't carry their own dependency information; shared mode gets these
 transitively via `libggml-cuda.so`'s NEEDED entries.
 

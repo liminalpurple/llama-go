@@ -23,6 +23,7 @@
 #include <random>
 #include <cstring>
 #include <regex>
+#include <mutex>
 
 // CUDA backend header for GPU info
 #ifdef GGML_USE_CUDA
@@ -85,8 +86,18 @@ static void llama_log_callback(ggml_log_level level, const char * text, void * /
 
 // Chat session plus a stable copy of its rendered prompt for the C API
 struct llama_wrapper_chat_session_t {
+    explicit llama_wrapper_chat_session_t(common_chat_session s)
+        : session(std::move(s)), prompt(session.prompt().str()) {}
+
     common_chat_session session;
     std::string prompt;
+
+    // Generated pieces with their tokens, not yet fed to the parser, which
+    // matches some markup (e.g. Gemma 4's channel tokens) by token, as the
+    // server's slot.generated. Generation appends while Go feeds from
+    // another thread when streaming.
+    std::mutex generated_mutex;
+    common_chat_input generated;
 };
 
 // Apply a chat session's sampling settings (generation prompt, grammar and
@@ -1178,6 +1189,12 @@ static char* generate_prompt(llama_wrapper_context_t* wrapper, const prompt_inpu
                 return false;
             }
             const std::string piece = common_token_to_piece(wrapper->ctx, id);
+            if (params.chat_session) {
+                // before the callback, which may feed the parser this piece
+                auto * chat = static_cast<llama_wrapper_chat_session_t *>(params.chat_session);
+                std::lock_guard<std::mutex> lock(chat->generated_mutex);
+                chat->generated.append(piece, id);
+            }
             if (params.callback_handle != 0 && !goTokenCallback(params.callback_handle, piece.c_str())) {
                 return false;
             }
@@ -1493,7 +1510,11 @@ static bool run_decision_task(llama_wrapper_context_t * w, const server_task & t
     // prompt in one batch, media and all, as in the server's mixed batches
     const bool mixed = !llama_get_memory(w->ctx) || !llama_get_causal_attn(w->ctx);
     const bool need_embd = task.need_embd();
-    const int read_from = mixed ? 0 : (decision.pos_first() >= 0 ? decision.pos_first() : n_tokens - 1);
+    int read_from = mixed ? 0 : (decision.pos_first() >= 0 ? decision.pos_first() : n_tokens - 1);
+    // packed questions are answered at their own positions, read from there
+    for (const int32_t pos : decision.label_pos) {
+        read_from = std::min(read_from, (int)pos);
+    }
     // with non-causal attention the whole batch must fit in one ubatch, as in the server
     const bool causal = llama_get_causal_attn(w->ctx);
     const int n_batch = causal ? (int)llama_n_batch(w->ctx) : (int)std::min(llama_n_batch(w->ctx), llama_n_ubatch(w->ctx));
@@ -1531,9 +1552,13 @@ static bool run_decision_task(llama_wrapper_context_t * w, const server_task & t
             i += (int)mtmd_input_chunk_get_n_tokens(chunk);
             continue;
         }
-        const int idx = batch.add(prompt.tokens[i], prompt.pos_at(i), 0, need_embd || i == n_tokens - 1);
+        const bool is_label = std::find(decision.label_pos.begin(), decision.label_pos.end(), i) != decision.label_pos.end();
+        const int idx = batch.add(prompt.tokens[i], prompt.pos_at(i), 0, need_embd || is_label || i == n_tokens - 1);
         if (!decision.order.empty()) {
             batch.tokens[idx].decision_order = decision.order[i];
+        }
+        if (!decision.group.empty()) {
+            batch.tokens[idx].decision_group = decision.group[i];
         }
         i++;
     }
@@ -1551,22 +1576,28 @@ static bool run_decision_task(llama_wrapper_context_t * w, const server_task & t
         }
         scores.assign(embd, embd + n_embd_out);
     } else if (!decision.labels.empty()) {
-        const float * logits = llama_get_logits_ith(w->ctx, -1);
-        if (!logits) {
-            g_last_error = "Failed to get logits";
+        // one score per output, the best of its labels, read at the last
+        // token or at each packed question's answer position
+        const size_t n_out = decision.label_groups.empty() ? decision.labels.size() : decision.label_groups.size();
+        if (!decision.label_pos.empty() && decision.label_pos.size() != n_out) {
+            g_last_error = "Decision has a different number of answer positions and outputs";
             return false;
         }
-        for (const llama_token label : decision.labels) {
-            scores.push_back(logits[label]);
-        }
-        if (!decision.label_groups.empty()) {
-            std::vector<float> grouped;
-            size_t i = 0;
-            for (const int32_t n : decision.label_groups) {
-                grouped.push_back(*std::max_element(scores.begin() + i, scores.begin() + i + n));
-                i += n;
+        size_t i = 0;
+        for (size_t o = 0; o < n_out; o++) {
+            const int32_t i_out = decision.label_pos.empty() ? -1 : decision.label_pos[o] - read_from;
+            const float * logits = llama_get_logits_ith(w->ctx, i_out);
+            const size_t n = decision.label_groups.empty() ? 1 : decision.label_groups[o];
+            if (!logits || i + n > decision.labels.size()) {
+                g_last_error = "Failed to get logits";
+                return false;
             }
-            scores = std::move(grouped);
+            float score = -INFINITY;
+            for (size_t j = i; j < i + n; j++) {
+                score = std::max(score, logits[decision.labels[j]]);
+            }
+            scores.push_back(score);
+            i += n;
         }
     } else {
         // every entry of the batch is an output, from prompt index read_from
@@ -1633,7 +1664,8 @@ char* llama_wrapper_decide(void* ctx, const char* request, const unsigned char* 
         // As llama-server's /v1/systemone handler
         const server_decision_context & decision = *w->decision;
         const json body = json::parse(request);
-        const auto questions = decision.parse_questions(body);
+        const auto questions = decision.parse_questions(body, w->mtmd && mtmd_support_audio(w->mtmd));
+        const size_t set_size = decision.set_size(questions);
         std::vector<raw_buffer> files;
         const json state = decision.prepare_state(decision.parse_state(body, files));
         for (int i = 0; i < n_media; i++) {
@@ -1648,13 +1680,23 @@ char* llama_wrapper_decide(void* ctx, const char* request, const unsigned char* 
             return nullptr;
         }
 
-        // one task per variant of each question, or one task for all the questions
+        // one task per variant of each question, or one task for all the
+        // questions, or one per packed set of them
         const mtmd_helper_init_opt init_opt = mtmd_helper_init_opt_default();
+        const bool is_packed = decision.is_joint() || set_size > 0;
         std::vector<server_task> tasks;
         if (decision.is_joint()) {
             server_task task(SERVER_TASK_TYPE_DECISION);
             decision.fill_task_joint(state, questions, files, w->mtmd, init_opt, task);
             tasks.push_back(std::move(task));
+        } else if (set_size > 0) {
+            for (size_t i = 0; i < questions.size(); i += set_size) {
+                const std::vector<server_decision_question> set(
+                    questions.begin() + i, questions.begin() + std::min(questions.size(), i + set_size));
+                server_task task(SERVER_TASK_TYPE_DECISION);
+                decision.fill_task_set(state, set, files, w->mtmd, init_opt, task);
+                tasks.push_back(std::move(task));
+            }
         } else {
             for (const auto & question : questions) {
                 for (size_t variant = 0; variant < decision.n_variants(question); variant++) {
@@ -1680,6 +1722,9 @@ char* llama_wrapper_decide(void* ctx, const char* request, const unsigned char* 
                 shared = std::min(shared, prompts[0].common_prefix(prompts[i]));
                 const int32_t pos_first = tasks[i].decision.pos_first();
                 shared = std::min(shared, (size_t)(pos_first >= 0 ? pos_first : prompts[i].size() - 1));
+                for (const int32_t pos : tasks[i].decision.label_pos) {
+                    shared = std::min(shared, (size_t)pos);
+                }
             }
             shared = prompts[0].boundary(shared);
             if (shared > 1) {
@@ -1692,7 +1737,7 @@ char* llama_wrapper_decide(void* ctx, const char* request, const unsigned char* 
                 if (resume_from < 0 || !decode_prompt_range(w, state, resume_from, (int)shared, false, decode_tgt)) {
                     return nullptr;
                 }
-                if (w->needs_checkpoint && (w->checkpoint.empty() || w->checkpoint.n_tokens != shared)) {
+                if (w->needs_checkpoint && (w->checkpoint.empty() || w->checkpoint.n_tokens != (int64_t)shared)) {
                     llama_memory_t mem = llama_get_memory(w->ctx);
                     w->checkpoint.update_pos(shared, llama_memory_seq_pos_min(mem, 0), llama_memory_seq_pos_max(mem, 0));
                     w->checkpoint.update_tgt(w->ctx, 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY);
@@ -1715,17 +1760,21 @@ char* llama_wrapper_decide(void* ctx, const char* request, const unsigned char* 
         size_t i_score = 0;
         for (const auto & question : questions) {
             std::vector<std::vector<float>> scores;
-            if (decision.is_joint()) {
-                // one result with the scores of all the questions, in order
-                const auto & all = results[0];
-                if (i_score + question.options.size() > all.size()) {
+            if (is_packed) {
+                // each result has the scores of its questions, in order
+                if (i_result >= results.size() || i_score + question.options.size() > results[i_result].size()) {
                     g_last_error = "Decision result has fewer scores than options";
                     return nullptr;
                 }
-                scores.emplace_back(all.begin() + i_score, all.begin() + i_score + question.options.size());
+                const auto & packed = results[i_result];
+                scores.emplace_back(packed.begin() + i_score, packed.begin() + i_score + question.options.size());
                 i_score += question.options.size();
+                if (i_score == packed.size()) {
+                    i_result++;
+                    i_score = 0;
+                }
             }
-            for (size_t variant = 0; !decision.is_joint() && variant < decision.n_variants(question); variant++) {
+            for (size_t variant = 0; !is_packed && variant < decision.n_variants(question); variant++) {
                 scores.push_back(results[i_result++]);
             }
             answers[question.id] = decision.format_answer(question, scores, !files.empty());
@@ -2107,14 +2156,11 @@ void* llama_wrapper_chat_session_new(void* model, void* templates, const char** 
         }
 
         // The vocab lets the session tokenise its grammar triggers and
-        // preserved tokens. Generated text is fed back as text, which the
-        // parser matches on.
+        // preserved tokens. Generated text is fed back with its tokens,
+        // recorded as it's sampled (see llama_wrapper_chat_session_t).
         const llama_vocab* vocab = llama_model_get_vocab(static_cast<llama_wrapper_model_t*>(model)->model);
-        auto* wrapper = new llama_wrapper_chat_session_t{
-            common_chat_session(static_cast<common_chat_templates*>(templates), vocab, inputs),
-            "",
-        };
-        wrapper->prompt = wrapper->session.prompt().str();
+        auto* wrapper = new llama_wrapper_chat_session_t(
+            common_chat_session(static_cast<common_chat_templates*>(templates), vocab, inputs));
         return wrapper;
     } catch (const std::exception& e) {
         g_last_error = "Failed to apply chat template: " + std::string(e.what());
@@ -2138,8 +2184,23 @@ llama_wrapper_parsed_message* llama_wrapper_chat_session_feed(void* session, con
     }
 
     try {
-        auto& chat = static_cast<llama_wrapper_chat_session_t*>(session)->session;
-        common_chat_input chunk{std::string(text)};
+        auto* wrapper = static_cast<llama_wrapper_chat_session_t*>(session);
+        auto& chat = wrapper->session;
+
+        // Take the text with its tokens from what generation recorded, or as
+        // plain text when it wasn't generated here
+        const std::string fed(text);
+        common_chat_input chunk;
+        {
+            std::lock_guard<std::mutex> lock(wrapper->generated_mutex);
+            if (wrapper->generated.size() >= fed.size() && wrapper->generated.text.compare(0, fed.size(), fed) == 0) {
+                chunk = wrapper->generated.substr(0, fed.size());
+                wrapper->generated = wrapper->generated.substr(fed.size());
+            } else {
+                chunk = common_chat_input(fed);
+                wrapper->generated = {};
+            }
+        }
         const common_chat_msg& msg = final ? chat.finish(chunk) : chat.feed(chunk);
 
         auto* result = new llama_wrapper_parsed_message;

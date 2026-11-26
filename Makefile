@@ -224,7 +224,7 @@ COMMON_SHARED_BASENAMES = libllama-common.so libllama.so libggml.so libggml-base
 
 # TODO: support Windows
 ifeq ($(GPU_TESTS),true)
-	CGO_LDFLAGS="-lcublas -lcudart -L/usr/local/cuda/lib64/"
+	CGO_LDFLAGS="-lcublas -lcublasLt -lcudart -L/usr/local/cuda/lib64/"
 	TEST_LABEL=gpu
 else
 	TEST_LABEL=!gpu
