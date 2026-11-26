@@ -173,6 +173,16 @@ int llama_wrapper_embeddings(void* ctx, const char* text, float* embeddings, int
 // Returns number of embeddings generated (should equal n_texts), or -1 on error
 int llama_wrapper_embeddings_batch(void* ctx, const char** texts, int n_texts, float* embeddings, int n_embd);
 
+// Batch embeddings of text with media (images, audio), one embedding per input
+// texts: each input's text, placing its media with the model's media marker once per item
+// media, media_sizes: every input's media items in order, as encoded files
+// n_media: number of media items for each input
+// embeddings: output buffer (must have space for n_inputs * n_embd floats)
+// Returns number of embeddings generated (should equal n_inputs), or -1 on error
+int llama_wrapper_embeddings_media_batch(void* ctx, const char** texts, int n_inputs,
+                                         const unsigned char* const* media, const size_t* media_sizes,
+                                         const int* n_media, float* embeddings, int n_embd);
+
 // Utility functions
 void llama_wrapper_free_result(char* result);
 int llama_wrapper_dry_max_seq_breakers(void);  // LLAMA_DRY_MAX_SEQ_BREAKERS

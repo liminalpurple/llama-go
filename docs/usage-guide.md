@@ -237,6 +237,32 @@ if err != nil {
 fmt.Printf("Generated %d embeddings\n", len(embeddings))
 ```
 
+Multimodal embedding models such as EmbeddingGemma 2 also embed images and audio, alone or
+together with text, into the same space as text. Load the model with its projector and pass
+the media as encoded files:
+
+```go
+model, _ := llama.LoadModel("embeddinggemma-2-Q8_0.gguf",
+    llama.WithMMProj("mmproj-embeddinggemma-2-Q8_0.gguf"))
+ctx, _ := model.NewContext(llama.WithEmbeddings())
+
+photo, _ := os.ReadFile("cat.jpg")
+image, _ := ctx.GetEmbeddingsWithMedia("", [][]byte{photo})
+
+// Several inputs at once, each giving one embedding
+embeddings, _ := ctx.GetEmbeddingsBatchWithMedia([]llama.EmbeddingInput{
+    {Media: [][]byte{photo}},
+    {Text: "a cat asleep on a sofa"},
+    {Text: model.MediaMarker() + " and its owner", Media: [][]byte{photo}},
+})
+```
+
+Media goes at the start of an input unless its text places each item with the model's
+`MediaMarker`. Text is passed to the model as it is, so add whatever prompt the model's card
+recommends (EmbeddingGemma's task prefixes, for example). An image can take hundreds of
+tokens, and each input must fit in one batch, so raise `WithBatch` (and `WithUBatch` for
+models with non-causal attention) if an input is rejected as too long.
+
 Some embedding models are trained on a shorter context than they can be used at. nomic-embed-text-v1.5
 is trained at 2048 tokens, and its model card recommends YaRN scaling for the full 8192:
 

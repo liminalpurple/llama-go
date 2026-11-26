@@ -61,6 +61,9 @@ jobs:
       TEST_DECISION_VISION_MODEL: vllm-d3-edge/vllm-d3-edge-Q8_0.gguf
       # A tiny mixture-of-experts model, for placing expert tensors on chosen devices
       TEST_MOE_MODEL: stories15M_MOE/stories15M_MOE-F16.gguf
+      # A multimodal embedding model, which also reads its input with
+      # non-causal attention and mean pooling, unlike Qwen3-Embedding
+      TEST_MEDIA_EMBEDDING_MODEL: embeddinggemma-2/embeddinggemma-2-Q8_0.gguf
       # Suppress verbose llama.cpp logs (set to "info" or "debug" for debugging)
       LLAMA_LOG: error
     steps:
@@ -131,6 +134,7 @@ jobs:
           TEST_DECISION_MODELS: ""
           TEST_DECISION_VISION_MODEL: ""
           TEST_MOE_MODEL: ""
+          TEST_MEDIA_EMBEDDING_MODEL: ""
         run: |
           TEST_CHAT_MODEL=$TEST_GEMMA_MODEL go run github.com/onsi/ginkgo/v2/ginkgo -tags cublas --flake-attempts 3 -v ./...
 

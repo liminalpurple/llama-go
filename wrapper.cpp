@@ -1342,12 +1342,12 @@ char* llama_wrapper_generate_with_tokens(void* ctx, const int* tokens, int n_tok
     return generate_prompt(wrapper, prompt, prefix_len, params);
 }
 
-// Tokenise a text prompt, with any media in it through mtmd, into a prompt
-// input. Returns false with g_last_error set.
-static bool tokenize_prompt(llama_wrapper_context_t * wrapper, const llama_wrapper_generate_params & params,
-                            prompt_input & prompt) {
-    if (params.n_media == 0) {
-        prompt.tokens = common_tokenize(wrapper->ctx, params.prompt, true, true);
+// Tokenise a text prompt, with any media it places through mtmd, into a
+// prompt input. Returns false with g_last_error set.
+static bool tokenize_prompt(llama_wrapper_context_t * wrapper, const char * text_in, const unsigned char * const * media,
+                            const size_t * media_sizes, int n_media, prompt_input & prompt) {
+    if (n_media == 0) {
+        prompt.tokens = common_tokenize(wrapper->ctx, text_in, true, true);
         return true;
     }
     if (!wrapper->mtmd) {
@@ -1359,12 +1359,12 @@ static bool tokenize_prompt(llama_wrapper_context_t * wrapper, const llama_wrapp
     // first for a clear error
     const std::string marker = mtmd_get_marker(wrapper->mtmd);
     int n_markers = 0;
-    for (const char * at = strstr(params.prompt, marker.c_str()); at; at = strstr(at + marker.size(), marker.c_str())) {
+    for (const char * at = strstr(text_in, marker.c_str()); at; at = strstr(at + marker.size(), marker.c_str())) {
         n_markers++;
     }
-    if (n_markers != params.n_media) {
+    if (n_markers != n_media) {
         g_last_error = "The prompt's media markers (" + std::to_string(n_markers) +
-                       ") don't match the number of media items (" + std::to_string(params.n_media) + ")";
+                       ") don't match the number of media items (" + std::to_string(n_media) + ")";
         return false;
     }
 
@@ -1378,8 +1378,8 @@ static bool tokenize_prompt(llama_wrapper_context_t * wrapper, const llama_wrapp
             mtmd_helper_video_free(video);
         }
     };
-    for (int i = 0; i < params.n_media; i++) {
-        const auto out = mtmd_helper_bitmap_init_from_buf(wrapper->mtmd, params.media[i], params.media_sizes[i], false,
+    for (int i = 0; i < n_media; i++) {
+        const auto out = mtmd_helper_bitmap_init_from_buf(wrapper->mtmd, media[i], media_sizes[i], false,
                                                           mtmd_helper_init_opt_default());
         if (out.video_ctx) {
             videos.push_back(out.video_ctx);
@@ -1393,7 +1393,7 @@ static bool tokenize_prompt(llama_wrapper_context_t * wrapper, const llama_wrapp
         bitmap_ptrs.push_back(out.bitmap);
     }
 
-    const mtmd_input_text text = { params.prompt, strlen(params.prompt), /*add_special*/ true, /*parse_special*/ true };
+    const mtmd_input_text text = { text_in, strlen(text_in), /*add_special*/ true, /*parse_special*/ true };
     mtmd::input_chunks_ptr chunks(mtmd_input_chunks_init());
     const int32_t res = mtmd_tokenize(wrapper->mtmd, chunks.get(), &text, bitmap_ptrs.data(), bitmap_ptrs.size());
     free_videos();
@@ -1422,7 +1422,7 @@ char* llama_wrapper_generate(void* ctx, llama_wrapper_generate_params params) {
 
     try {
         prompt_input prompt;
-        if (!tokenize_prompt(wrapper, params, prompt)) {
+        if (!tokenize_prompt(wrapper, params.prompt, params.media, params.media_sizes, params.n_media, prompt)) {
             return nullptr;
         }
         if (prompt.tokens.empty()) {
@@ -1469,7 +1469,7 @@ static prompt_input decision_prompt(const server_tokens & tokens) {
 // the next chunk, so the output is copied into store, which must outlive the
 // decode, as the server copies it into its batch.
 static bool add_media_embd(llama_wrapper_context_t * w, const mtmd_input_chunk * chunk, llama_pos pos0, bool output,
-                           common_batch & batch, std::vector<std::vector<float>> & store) {
+                           common_batch & batch, std::vector<std::vector<float>> & store, llama_seq_id seq = 0) {
     if (mtmd_encode_chunk(w->mtmd, chunk) != 0) {
         return false;
     }
@@ -1489,7 +1489,7 @@ static bool add_media_embd(llama_wrapper_context_t * w, const mtmd_input_chunk *
             pos[2] = rel.x;
             pos[3] = rel.z;
         }
-        batch.add_embd({ embd + i * n_embd, 1, n_embd }, pos, 0, output);
+        batch.add_embd({ embd + i * n_embd, 1, n_embd }, pos, seq, output);
     }
     return true;
 }
@@ -2060,6 +2060,131 @@ int llama_wrapper_embeddings_batch(void* ctx, const char** texts, int n_texts, f
 
     } catch (const std::exception& e) {
         g_last_error = "Exception during batch embedding generation: " + std::string(e.what());
+        return -1;
+    }
+}
+
+int llama_wrapper_embeddings_media_batch(void* ctx, const char** texts, int n_inputs,
+                                         const unsigned char* const* media, const size_t* media_sizes,
+                                         const int* n_media, float* embeddings, int n_embd) {
+    if (!ctx || !texts || !n_media || !embeddings || n_inputs <= 0 || n_embd <= 0) {
+        g_last_error = "Invalid parameters for media embeddings";
+        return -1;
+    }
+
+    auto wrapper = static_cast<llama_wrapper_context_t*>(ctx);
+    if (!check_pooling(wrapper)) {
+        return -1;
+    }
+    if (n_embd != llama_model_n_embd_out(wrapper->model)) {
+        g_last_error = "Embedding width doesn't match the model's output width";
+        return -1;
+    }
+
+    try {
+        // Each input is its text with the media it places, as the server's
+        // multimodal /v1/embeddings input
+        std::vector<prompt_input> inputs(n_inputs);
+        int offset = 0;
+        for (int k = 0; k < n_inputs; k++) {
+            if (!texts[k] || n_media[k] < 0 || (n_media[k] > 0 && (!media || !media_sizes))) {
+                g_last_error = "Invalid input at index " + std::to_string(k);
+                return -1;
+            }
+            if (!tokenize_prompt(wrapper, texts[k], media ? media + offset : nullptr,
+                                 media_sizes ? media_sizes + offset : nullptr, n_media[k], inputs[k])) {
+                g_last_error = "Input " + std::to_string(k) + ": " + g_last_error;
+                return -1;
+            }
+            if (inputs[k].size() == 0) {
+                g_last_error = "Input content cannot be empty (input at index " + std::to_string(k) + ")";
+                return -1;
+            }
+            offset += n_media[k];
+        }
+
+        // Each input is pooled from one decode, and with non-causal attention
+        // that decode must fit in one ubatch
+        const bool causal = llama_get_causal_attn(wrapper->ctx);
+        const int n_batch = causal ? (int)llama_n_batch(wrapper->ctx)
+                                   : (int)std::min(llama_n_batch(wrapper->ctx), llama_n_ubatch(wrapper->ctx));
+        const int n_seq_max = (int)llama_n_seq_max(wrapper->ctx);
+
+        llama_memory_t mem = llama_get_memory(wrapper->ctx);
+        llama_memory_clear(mem, true);
+        wrapper->cached.clear();
+
+        common_batch batch(wrapper->ctx);
+        std::vector<std::vector<float>> media_embd;  // the media embeddings the batch points at
+        int stored = 0;
+        int n_seq = 0;
+
+        // Decode the inputs in the batch, one sequence each, and store their embeddings
+        auto flush = [&]() {
+            if (n_seq == 0) {
+                return true;
+            }
+            if (llama_process(wrapper->ctx, LLAMA_PROCESS_TYPE_DECODE, batch.get()) != 0) {
+                g_last_error = "Failed to decode media embeddings batch";
+                return false;
+            }
+            for (int seq = 0; seq < n_seq; seq++) {
+                const float* embd = llama_get_embeddings_seq(wrapper->ctx, seq);
+                if (!embd) {
+                    g_last_error = "Failed to get embeddings for input " + std::to_string(stored);
+                    return false;
+                }
+                memcpy(embeddings + (size_t)stored * n_embd, embd, n_embd * sizeof(float));
+                stored++;
+                llama_memory_seq_rm(mem, seq, -1, -1);
+            }
+            n_seq = 0;
+            batch.clear();
+            media_embd.clear();
+            return true;
+        };
+
+        for (int k = 0; k < n_inputs; k++) {
+            const prompt_input & input = inputs[k];
+            const int n_tokens = (int)input.size();
+            if (n_tokens > n_batch) {
+                g_last_error = "Input " + std::to_string(k) + " needs " + std::to_string(n_tokens) +
+                               " tokens in one batch, more than the context's " + std::to_string(n_batch) +
+                               (causal ? "; increase WithBatch" : "; increase WithBatch and WithUBatch");
+                return -1;
+            }
+            if (batch.size() + n_tokens > n_batch || n_seq >= n_seq_max) {
+                if (!flush()) {
+                    return -1;
+                }
+            }
+            for (int i = 0; i < n_tokens;) {
+                size_t start = 0;
+                if (const mtmd_input_chunk * chunk = input.chunk_at(i, start)) {
+                    if (!add_media_embd(wrapper, chunk, input.pos_at(i), true, batch, media_embd, n_seq)) {
+                        g_last_error = "Failed to encode media in input " + std::to_string(k);
+                        return -1;
+                    }
+                    i += (int)mtmd_input_chunk_get_n_tokens(chunk);
+                    continue;
+                }
+                batch.add(input.tokens[i], input.pos_at(i), n_seq, true);
+                i++;
+            }
+            n_seq++;
+        }
+        if (!flush()) {
+            return -1;
+        }
+
+        if (stored != n_inputs) {
+            g_last_error = "Embedding count mismatch: expected " + std::to_string(n_inputs) + ", got " +
+                           std::to_string(stored);
+            return -1;
+        }
+        return stored;
+    } catch (const std::exception& e) {
+        g_last_error = "Exception during media embedding generation: " + std::string(e.what());
         return -1;
     }
 }

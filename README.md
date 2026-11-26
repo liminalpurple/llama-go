@@ -113,7 +113,8 @@ so the `.so` files only need to sit next to the executable.
 **Text generation and chat**: Generate text with LLMs using native chat completion (with automatic
 chat template formatting) or raw text generation. Give vision and audio models images and audio
 clips through their multimodal projectors. Ask decision models typed questions for calibrated
-answers. Extract embeddings for semantic search, clustering, and similarity tasks.
+answers. Extract embeddings for semantic search, clustering, and similarity tasks, including
+images and audio with multimodal embedding models.
 
 **GPU acceleration**: Supports NVIDIA (CUDA), AMD (ROCm), Apple Silicon (Metal), Intel (SYCL), and
 cross-platform acceleration (Vulkan, OpenCL). Eight backend options cover virtually all modern GPU
