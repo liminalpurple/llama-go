@@ -347,17 +347,27 @@ endif
 else
 	@echo "Copying shared libraries (BUILD_LINKAGE=shared)..."
 	cp $(COMMON_SHARED_LIBS) .
-	@for lib in $(COMMON_SHARED_BASENAMES); do ln -sf $$lib $$lib.0; done
+	@$(call link_sonames,$(COMMON_SHARED_BASENAMES))
 ifneq ($(BACKEND_SHARED_LIBS),)
 	cp $(BACKEND_SHARED_LIBS) .
-	@for lib in $(BACKEND_SHARED_BASENAMES); do ln -sf $$lib $$lib.0; done
+	@$(call link_sonames,$(BACKEND_SHARED_BASENAMES))
 endif
 endif
+
+# Binaries record each library's SONAME (e.g. libmtmd.so.1), so link that name
+# to the copied library. The versions differ between libraries (ggml's and
+# llama.cpp's own) and change upstream, so read them rather than assume one.
+define link_sonames
+for lib in $(1); do \
+	soname=$$(objdump -p $$lib | awk '/SONAME/ { print $$2 }'); \
+	if [ -n "$$soname" ] && [ "$$soname" != "$$lib" ]; then ln -sf $$lib $$soname; fi; \
+done
+endef
 
 clean:
 	rm -rf *.o *.d
 	rm -rf *.a
-	rm -rf *.so *.so.0
+	rm -rf *.so *.so.*
 	rm -rf llama.cpp/*.o
 	rm -rf cgo_headers
 	cd llama.cpp && git checkout -- . && git clean -fd
